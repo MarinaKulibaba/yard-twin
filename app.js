@@ -231,10 +231,11 @@ function build(){
   dockChips=[];
   state.docks.forEach((dk,i)=>{const x=dockX(i);const occ=!!dk.truck;
     wh.add(mesh(RB(4.7,5.3,.5,.08),blue,x,2.65,.18));
-    const rec=mesh(new THREE.BoxGeometry(3.8,4.4,.2),M(occ?'#1b2540':'#dfe5ef'),x,2.4,.35,false);
-    if(!occ){const t=stripeTex('#e6ebf3','#cfd7e4',14,false);rec.material=new THREE.MeshStandardMaterial({map:t,roughness:.6})}
-    wh.add(rec);
-    if(occ){const glow=mesh(new THREE.PlaneGeometry(3.4,3.9),M('#ffe6bd',{emissive:'#ffd59a',emissiveIntensity:.35}),x,2.3,.46,false);wh.add(glow);const p=makePallet(2,false,.95);p.position.set(x-.8,0,.9);wh.add(p);const p2=makePallet(1,false,.95);p2.position.set(x+.75,0,.9);wh.add(p2)}
+    wh.add(mesh(new THREE.BoxGeometry(3.8,4.4,.1),M('#1b2540'),x,2.4,.3,false));
+    const glow=mesh(new THREE.PlaneGeometry(3.4,3.9),M('#ffe6bd',{emissive:'#ffd59a',emissiveIntensity:.35}),x,2.3,.36,false);wh.add(glow);
+    const rec=mesh(new THREE.BoxGeometry(3.8,4.4,.16),new THREE.MeshStandardMaterial({map:stripeTex('#e6ebf3','#cfd7e4',14,false),roughness:.6}),x,2.4,.46,false);
+    wh.add(rec);dk.door=rec;dk.glow=glow;dk.openK=occ?1:0;setDoor(dk);
+    if(occ){const p=makePallet(2,false,.95);p.position.set(x-.8,0,.9);wh.add(p);const p2=makePallet(1,false,.95);p2.position.set(x+.75,0,.9);wh.add(p2)}
     [-1.75,1.75].forEach(dx=>wh.add(mesh(RB(.35,.55,.3,.06),M('#1e2433'),x+dx,1.0,.55)));
     const lamp=mesh(RB(.5,.22,.14,.05),M(occ?'#f59e0b':'#22c55e',{emissive:occ?'#f59e0b':'#22c55e',emissiveIntensity:1}),x+1.8,5.0,.48,false);wh.add(lamp);dk.lamp=lamp;
     dockChips.push({el:null,pos:new THREE.Vector3(x,5.55,.6),text:dk.id});
@@ -268,6 +269,8 @@ function build(){
     if(f.op==='Charging'){const p=chargeSpot(f.slot);g.position.copy(p);g.rotation.y=-Math.PI/2}
     else{setForkliftLoop(e,k)}});
   buildAirportDistrict(W/2+70);
+  buildDepotCampus(-120,-46,3,3,s.seed*5+11,{link:[-W/2-34,27],kinds:['terminal','hub','vans','branch','terminal','terminal','terminal','vans','terminal']});
+  buildTown(-330,330,s.seed*7+3,{roadZ:32,rows:5,cars:10});
   makeDockChips();refreshMarkers();
 }
 function setForkliftLoop(e,k,init=true){const f=e.data;const g=e.obj;
@@ -287,11 +290,11 @@ const tmp=new THREE.Vector3();
 function lerpAngle(a,b,t){let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;return a+d*t}
 function stepMover(e,dt){const g=e.obj;
   if(state.offline)return;
-  if(e.loopRoad){g.position.x+=e.speed*dt;g.rotation.y=Math.PI/2;if(g.position.x>300)g.position.x=-220;return}
+  if(e.loopRoad){const lo=e.lo??-220,hi=e.hi??300;g.position.x+=e.speed*dt;g.rotation.y=e.speed>0?Math.PI/2:-Math.PI/2;if(g.position.x>hi)g.position.x=lo;if(g.position.x<lo)g.position.x=hi;return}
   if(e.path){const p=e.path[0];tmp.subVectors(p.v,g.position);tmp.y=0;const dist=tmp.length();
     if(dist<.15){e.path.shift();if(!e.path.length){e.path=null;e.onArrive&&e.onArrive();}return}
-    tmp.normalize();const sp=Math.min(e.speed*dt,dist);g.position.addScaledVector(tmp,sp);
-    let ang=Math.atan2(tmp.x,tmp.z);if(p.rev)ang+=Math.PI;g.rotation.y=lerpAngle(g.rotation.y,ang,Math.min(1,dt*(p.turn||4)));return}
+    tmp.normalize();const sp=Math.min((p.sp||e.speed)*dt,dist);g.position.addScaledVector(tmp,sp);
+    let ang=Math.atan2(tmp.x,tmp.z);if(p.rev)ang+=Math.PI;if(p.snap){g.position.x+=(p.v.x-g.position.x)*Math.min(1,dt*4)}g.rotation.y=lerpAngle(g.rotation.y,ang,Math.min(1,dt*(p.turn||4)));return}
   if(e.loop){if(e.pause>0){e.pause-=dt;return}
     const p=e.loop[e.li];tmp.subVectors(p,g.position);tmp.y=0;const dist=tmp.length();
     if(dist<.12){const dock=e.data.dock!=null&&!e.free;
@@ -768,7 +771,57 @@ function buildWarehouseDistrict(x0,goId){const g=new THREE.Group();const blue=M(
 
 /* ================= JOURNEY: scroll along the parcel's road ================= */
 const L2=(en,uk)=>LANG==='uk'?uk:en;
-const JA=[[0,0,2,.85],[36,0,20,.9],[140,0,-12,.62],[385,34,-56,.5],[552,0,-12,.62],[768,0,2,.8],[862,0,22,.95],[946,0,16,1.15],[1006,0,10,1.15]];
+
+/* ---------- depot park: a small town of parcel terminals behind the yard (unbranded) ---------- */
+function makeTerminal(nDoors,r,big=false){const g=new THREE.Group();const blue=M('#2f58db',{roughness:.5});const w=nDoors*6+(big?14:8),d=big?24:18,H=big?10:7.5;
+  const wt=stripeTex('#eef1f7','#dfe4ee',10,true);wt.repeat.set(w/1.6,1);const wm=new THREE.MeshStandardMaterial({map:wt,roughness:.65});
+  g.add(mesh(new THREE.BoxGeometry(w,H,d),[wm,wm,M('#dfe5ef'),M('#dfe5ef'),wm,wm],0,H/2,0));
+  g.add(mesh(RB(w+.3,1,d+.3,.05),blue,0,.5,0));g.add(mesh(new THREE.BoxGeometry(w+.4,.7,d+.4),blue,0,H+.1,0));
+  for(let i=0;i<Math.floor(w/9);i++)g.add(mesh(RB(2.4,.9,3,.15),M('#c9d1de'),-w/2+5+i*9,H+.9,-d/4,false));
+  g.add(mesh(new THREE.BoxGeometry(w*.7,.1,1.4),M('#c8d8ff',{emissive:'#9ec0ff',emissiveIntensity:.15}),0,H+.5,0,false));
+  const doors=[];const x0=-w/2+(big?10:6);
+  for(let i=0;i<nDoors;i++){const x=x0+i*6;const open=r()<.55;
+    g.add(mesh(RB(4.6,5,.4,.08),blue,x,2.5,d/2+.1));g.add(mesh(new THREE.BoxGeometry(3.7,4.2,.1),M('#1b2540'),x,2.2,d/2+.25,false));
+    if(open)g.add(mesh(new THREE.PlaneGeometry(3.3,3.6),M('#ffe6bd',{emissive:'#ffd59a',emissiveIntensity:.35}),x,2.1,d/2+.31,false));
+    const dr=mesh(new THREE.BoxGeometry(3.7,4.2,.14),new THREE.MeshStandardMaterial({map:stripeTex('#e6ebf3','#cfd7e4',14,false),roughness:.6}),x,2.2,d/2+.4,false);
+    if(open){dr.scale.y=.1;dr.position.y=4.1}g.add(dr);
+    g.add(mesh(RB(.45,.2,.12,.04),M(open?'#f59e0b':'#22c55e',{emissive:open?'#f59e0b':'#22c55e',emissiveIntensity:1}),x+1.8,4.7,d/2+.36,false));
+    doors.push({x,open})}
+  // office corner with glazing
+  g.add(mesh(new THREE.BoxGeometry(big?8:5,3.2,.12),M('#9cc3ff',{emissive:'#6aa5ff',emissiveIntensity:.22,roughness:.15,metalness:.25}),w/2-(big?5:3.4),H*.55,d/2+.08,false));
+  g.add(mesh(RB(big?9:6,1.2,.3,.1),blue,w/2-(big?5:3.4),H-.9,d/2+.2,false));
+  return {g,doors,w,d}}
+function buildDepotCampus(x0,z0,cols,rows,seed,o={}){const r=rngOf(seed);const g=new THREE.Group();
+  const CW=84,CD=56,asph=M('#c4cddc',{roughness:.95}),pave=M('#f1f4f9',{roughness:.9}),line=M('#ffffff'),yel=M('#f2c94c',{roughness:.6}),grass=M('#d3eedc',{roughness:1});
+  const xa=x0-CW/2,xb=x0+cols*CW-CW/2,zTop=z0-rows*CD;
+  // street grid: east-west streets south of every row, north-south streets between columns
+  const ew=[];for(let k=0;k<=rows;k++){const z=z0+14-k*CD;ew.push(z);g.add(mesh(new THREE.BoxGeometry(xb-xa+8,.05,9),asph,(xa+xb)/2,.03,z,false));for(let x=xa;x<xb;x+=6)g.add(mesh(new THREE.BoxGeometry(2.6,.02,.2),line,x,.07,z,false))}
+  for(let c=0;c<=cols;c++){const x=xa+c*CW;g.add(mesh(new THREE.BoxGeometry(9,.05,ew[0]-ew[rows]),asph,x,.032,(ew[0]+ew[rows])/2,false))}
+  if(o.link){const [lx,lz]=o.link;g.add(mesh(new THREE.BoxGeometry(9,.05,lz-ew[0]),asph,lx,.034,(lz+ew[0])/2,false));for(let z=ew[0]+3;z<lz;z+=5)g.add(mesh(new THREE.BoxGeometry(.2,.02,2.4),line,lx,.08,z,false))}
+  const kinds=o.kinds||['hub','terminal','vans','terminal','branch','terminal'];let n=0;
+  for(let rr=0;rr<rows;rr++)for(let c=0;c<cols;c++){const cx=x0+c*CW,cz=z0-rr*CD;const kind=kinds[n++%kinds.length];
+    g.add(mesh(new THREE.BoxGeometry(CW-11,.04,CD-11),pave,cx,.02,cz-14,false));
+    if(kind==='hub'||kind==='terminal'){const big=kind==='hub';const T=makeTerminal(big?10:7+Math.floor(r()*2),r,big);const tz=cz-14-(big?2:0);T.g.position.set(cx,0,tz);g.add(T.g);
+      const fz=tz+T.d/2;for(let k=0;k<T.doors.length;k++){const dd=T.doors[k];g.add(mesh(new THREE.BoxGeometry(.18,.02,9),yel,cx+dd.x-3,.06,fz+5,false));
+        if(dd.open&&r()<.8){const isVan=r()<.35;const tr=isVan?makeVan():makeTruck(['#2f5be0','#f4f6fb','#2f5be0','#475569'][Math.floor(r()*4)]);tr.position.set(cx+dd.x,0,fz+(isVan?3.7:7));g.add(tr)}}
+      for(let k=0;k<3;k++){const p=makePallet(1+Math.floor(r()*2),false,.95);p.position.set(cx+T.w/2+3,0,tz-6+k*3);g.add(p)}}
+    if(kind==='vans'){for(let row=0;row<2;row++)for(let k=0;k<7;k++){const v=makeVan();v.position.set(cx-27+k*5.2,0,cz-26+row*11);v.rotation.y=row?Math.PI:0;g.add(v);
+        g.add(mesh(new THREE.BoxGeometry(.16,.02,6),line,cx-29.6+k*5.2,.06,cz-26+row*11,false))}
+      const b=makeBranch();b.position.set(cx+24,0,cz-22);b.rotation.y=-Math.PI/2;g.add(b);
+      for(let k=0;k<4;k++){const ch=mesh(RB(1,1.8,.8,.15),M('#2f58db'),cx-27+k*5.2,.9,cz-12,false);g.add(ch)}}
+    if(kind==='branch'){const b=makeBranch();b.position.set(cx-14,0,cz-16);g.add(b);
+      for(let k=0;k<3;k++){const lk=makeLocker();lk.position.set(cx+10+k*6,0,cz-24);g.add(lk)}
+      const p=mesh(new THREE.PlaneGeometry(26,14),grass,cx+16,.03,cz-8,false);p.rotation.x=-Math.PI/2;g.add(p);
+      for(let k=0;k<6;k++){const t=makeTree(.7+r()*.4,r);t.position.set(cx+6+r()*22,0,cz-13+r()*9);g.add(t)}
+      for(let k=0;k<3;k++){const c2=makeCar(r);c2.position.set(cx-24+k*3.6,0,cz-4);g.add(c2)}}
+    // corner trees
+    [[-CW/2+8,-CD+18],[CW/2-8,-CD+18]].forEach(([dx,dz])=>{const t=makeTree(.8,r);t.position.set(cx+dx,0,cz+dz);g.add(t)});
+  }
+  g.userData.exclude=true;g.traverse(m=>{if(m.isMesh)m.castShadow=false});root.add(g);
+  // vans driving on the park streets
+  ew.forEach((z,k)=>[-1,1].forEach(sd=>{const v=makeVan();v.position.set(xa+r()*(xb-xa),0,z+sd*2.2);root.add(v);movers.push({obj:v,loopRoad:true,speed:sd*(5+r()*3),lo:xa,hi:xb})}));
+  return {xa,xb,zTop}}
+const JA=[[0,0,2,.85],[36,0,20,.9],[140,0,-12,.62],[385,34,-56,.5],[552,0,-12,.62],[830,0,-44,.5],[862,0,22,.95],[946,0,16,1.15],[1006,0,10,1.15]];
 const JST=[
  {icon:'home',t:['Warehouse WH-04','Склад WH-04'],s:['Picked, packed, loaded on TRK-2311','Зібрано, запаковано, завантажено в TRK-2311'],st:['Loaded on truck','У вантажівці'],
   k:[['Orders picked','Зібрано замовлень','1,284','+6%'],['Dock-to-truck','Від доку до вантажівки','38 min',''],['Pick accuracy','Точність збирання','99.6%','+0.1%']],
@@ -839,6 +892,59 @@ function makeHouse(c,r){const g=new THREE.Group();g.add(mesh(RB(7,4.2,6,.15),M(c
   const roof=mesh(new THREE.ConeGeometry(5.4,2.6,4),M(r,{roughness:.6}),0,5.5,0);roof.rotation.y=Math.PI/4;roof.scale.set(1,1,.85);g.add(roof);
   g.add(mesh(new THREE.BoxGeometry(1.2,2.1,.1),M('#8a6a4b'),1.6,1.05,3.02,false));[-1.6].forEach(x=>g.add(mesh(new THREE.BoxGeometry(1.5,1.1,.08),M('#9cc3ff',{emissive:'#6aa5ff',emissiveIntensity:.2}),x,2.4,3.02,false)));
   g.add(mesh(RB(2.4,.2,1.6,.05),M('#e5e9f2'),1.6,.1,3.8));return g}
+/* ---------- town: blocks, side streets, parcel branches, traffic (no logos, no lettering) ---------- */
+function winTex(base,win,cols,rows){const k='win'+base+win+cols+rows;if(mats[k])return mats[k];const c=document.createElement('canvas');c.width=128;c.height=128;const x=c.getContext('2d');x.fillStyle=base;x.fillRect(0,0,128,128);
+  const cw=128/cols,rh=128/rows;for(let i=0;i<cols;i++)for(let j=0;j<rows;j++){x.fillStyle=(i*7+j*3)%5===0?'#ffe7b0':win;x.fillRect(i*cw+cw*.22,j*rh+rh*.25,cw*.56,rh*.5)}
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return mats[k]=new THREE.MeshStandardMaterial({map:t,roughness:.7})}
+function makeApartment(r){const g=new THREE.Group();const fl=3+Math.floor(r()*5),w=8+Math.floor(r()*4)*2,d=8;const h=fl*2.6;
+  const cols=[['#eef2f8','#9fb6d9'],['#f4efe7','#a9bcd8'],['#e6edf8','#8fa9d3'],['#f7f3ea','#b4c4dc']][Math.floor(r()*4)];
+  const body=mesh(new THREE.BoxGeometry(w,h,d),winTex(cols[0],cols[1],Math.round(w/2),fl),0,h/2,0);g.add(body);
+  g.add(mesh(new THREE.BoxGeometry(w+.4,.35,d+.4),M('#cfd8e6'),0,h+.17,0));
+  if(r()<.5)g.add(mesh(new THREE.BoxGeometry(2.2,1.2,2.2),M('#dfe5ef'),w/4,h+.9,-1));
+  g.add(mesh(new THREE.BoxGeometry(1.6,2.2,.12),M('#2b3a55'),0,1.1,d/2+.02,false));return g}
+function makeShop(r){const g=new THREE.Group();const w=9,h=4.2,d=7;const c=['#fde7d4','#e9f7ef','#e8eefc','#fff3d6'][Math.floor(r()*4)];
+  g.add(mesh(RB(w,h,d,.12),M(c),0,h/2,0));g.add(mesh(new THREE.BoxGeometry(w-1.2,2,.1),M('#a9c8f5',{emissive:'#7fb0ff',emissiveIntensity:.18,roughness:.15}),0,1.4,d/2+.02,false));
+  const aw=mesh(new THREE.BoxGeometry(w-.6,.18,1.6),M(['#e5484d','#2f58db','#16a34a','#f59e0b'][Math.floor(r()*4)]),0,2.75,d/2+.7,false);aw.rotation.x=.25;g.add(aw);return g}
+function makeBranch(){const g=new THREE.Group();const b=M('#2f58db',{roughness:.5}),w=M('#f6f8fc');
+  g.add(mesh(RB(14,5,9,.15),w,0,2.5,0));g.add(mesh(new THREE.BoxGeometry(14.2,.9,9.2),b,0,5.1,0));
+  g.add(mesh(new THREE.BoxGeometry(4,3.6,.12),M('#a9c8f5',{emissive:'#7fb0ff',emissiveIntensity:.2,roughness:.15}),-3.5,1.9,4.52,false));
+  const gd=mesh(new THREE.BoxGeometry(4.2,3.8,.12),new THREE.MeshStandardMaterial({map:stripeTex('#e6ebf3','#cfd7e4',12,false),roughness:.6}),3.4,1.9,4.52,false);g.add(gd);
+  g.add(mesh(RB(1.4,1.4,.25,.1),b,-3.5,4.2,4.6,false));
+  const lk=makeLocker();lk.scale.setScalar(.55);lk.position.set(-8.6,0,2.5);lk.rotation.y=Math.PI/2;g.add(lk);
+  [0,1].forEach(i=>{const v=makeVan();v.position.set(1.8+i*3.4,0,8.6);v.rotation.y=Math.PI;g.add(v)});return g}
+function makeCar(r){const g=new THREE.Group();const c=['#e5484d','#f4f6fb','#2f58db','#475569','#f2c94c','#16a34a','#1e2433'][Math.floor(r()*7)];
+  g.add(mesh(RB(1.9,.8,4,.3),M(c,{roughness:.4}),0,.65,0));g.add(mesh(RB(1.7,.7,2.1,.25),M('#1c2b47',{roughness:.15,metalness:.3}),0,1.3,-.2));
+  [[-.85,1.3],[.85,1.3],[-.85,-1.3],[.85,-1.3]].forEach(([x,z])=>{const w=mesh(new THREE.CylinderGeometry(.36,.36,.3,12),M('#1e2433'),x,.36,z,false);w.rotation.z=Math.PI/2;g.add(w)});return g}
+function buildTown(x1,x2,seed,o={}){const r=rngOf(seed);const ex=[];const bb=new THREE.Box3(),sz=new THREE.Vector3();
+  root.children.forEach(c=>{bb.setFromObject(c);bb.getSize(sz);if(!isFinite(sz.x)||(!c.userData.exclude&&(sz.x>260||sz.z>260)))return;ex.push(bb.clone().expandByScalar(3))});
+  const roadZ=o.roadZ??32,lanes=[roadZ-2.5,roadZ+2.5];ex.push(new THREE.Box3(new THREE.Vector3(-1e4,-1,roadZ-7),new THREE.Vector3(1e4,50,roadZ+7)));
+  const free=(x,z,w,d)=>{const b=new THREE.Box3(new THREE.Vector3(x-w/2,0,z-d/2),new THREE.Vector3(x+w/2,9,z+d/2));return !ex.some(e=>e.intersectsBox(b))};
+  const take=(x,z,w,d)=>ex.push(new THREE.Box3(new THREE.Vector3(x-w/2,0,z-d/2),new THREE.Vector3(x+w/2,9,z+d/2)));
+  const asph=M('#d5dce8',{roughness:.95}),walk=M('#eef1f6'),zeb=M('#ffffff');
+  const g=new THREE.Group();
+  // side streets
+  const streets=[];for(let x=x1+30;x<x2-20;x+=64+Math.floor(r()*20)){[[roadZ+7,roadZ+110],[roadZ-110,roadZ-7]].forEach(([a,b])=>{
+      let s=a,e=b;const step=4;let segs=[];let cur=null;for(let z=a;z<=b;z+=step){const ok=free(x,z,9,step);if(ok){if(cur==null)cur=z}else if(cur!=null){segs.push([cur,z-step]);cur=null}}if(cur!=null)segs.push([cur,b]);
+      segs.forEach(([za,zb])=>{const touch=Math.abs(za-(roadZ+7))<5||Math.abs(zb-(roadZ-7))<5;if(zb-za<24||!touch)return;const L=zb-za,cz=(za+zb)/2;
+        g.add(mesh(new THREE.BoxGeometry(12,.05,L),walk,x,.025,cz,false));g.add(mesh(new THREE.BoxGeometry(8,.06,L),asph,x,.04,cz,false));
+        for(let z=za+2;z<zb-2;z+=5)g.add(mesh(new THREE.BoxGeometry(.2,.02,2.4),zeb,x,.08,z,false));streets.push([x,za,zb]);take(x,cz,13,L)})})
+    for(let k=-3;k<=3;k++)g.add(mesh(new THREE.BoxGeometry(.6,.02,4),zeb,x+k*1.1,.06,roadZ+0,false))}
+  // frontage branches (parcel offices) every ~140 units
+  const nb=[];for(let x=x1+50;x<x2-30;x+=120+Math.floor(r()*50)){const z=roadZ+15;const side=r()<.5;const zz=side?z:roadZ-15;for(let dx=0;dx<40;dx+=8){if(free(x+dx,zz,16,12)){const b=makeBranch();b.position.set(x+dx,0,zz);b.rotation.y=side?Math.PI:0;g.add(b);take(x+dx,zz,16,14);nb.push(b);break}}}
+  // blocks
+  for(let x=x1;x<x2;x+=12)for(let row=0;row<(o.rows??6);row++){[1,-1].forEach(sd=>{const z=roadZ+sd*(14+row*13)+(r()-.5)*2;if(r()<.18)return;const kind=r();
+      const w=kind<.45?10:kind<.75?11:12,d=kind<.45?9:10;if(!free(x,z,w,d))return;let b;
+      if(row===0&&kind<.35)b=makeShop(r);else if(kind<.5)b=makeHouse(['#fde7d4','#e8eefc','#e9f7ef','#f4f6fb','#fff3d6'][Math.floor(r()*5)],['#e5484d','#2f58db','#475569','#b45309'][Math.floor(r()*4)]);
+      else if(kind<.85)b=makeApartment(r);else{b=new THREE.Group();for(let k=0;k<3;k++){const t=makeTree(.8+r()*.6,r);t.position.set((r()-.5)*7,0,(r()-.5)*6);b.add(t)}}
+      b.position.set(x,0,z);b.rotation.y=sd>0?Math.PI:0;g.add(b);take(x,z,w,d);
+      if(r()<.25&&free(x+6.5,z+sd*-5.5,2.4,4.4)){const c=makeCar(r);c.position.set(x+6.5,0,z-sd*5.5);c.rotation.y=r()<.5?0:Math.PI;g.add(c);take(x+6.5,z-sd*5.5,2.4,4.4)}})}
+  // sidewalk trees along main road
+  for(let x=x1;x<x2;x+=9)[roadZ+8.5,roadZ-8.5].forEach(z=>{if(r()<.45&&free(x,z,2,2)){const t=makeTree(.7+r()*.3,r);t.position.set(x,0,z);g.add(t);take(x,z,2,2)}});
+  g.traverse(m=>{if(m.isMesh)m.castShadow=false});root.add(g);
+  // traffic
+  const n=o.cars??14;for(let i=0;i<n;i++){const c=(i%5===0)?makeVan():makeCar(r);const dir=o.oneWay?-1:(i%2?1:-1);c.position.set(x1+r()*(x2-x1),0,dir>0?lanes[1]:lanes[0]);root.add(c);
+    movers.push({id:'car'+i,type:'car',obj:c,loopRoad:true,speed:dir*(7+r()*5),lo:x1-20,hi:x2+20})}
+}
 function hero(obj,keys,range,tag,pitch=false){obj.visible=false;root.add(obj);J.heroes.push({obj,keys,range,tag,pitch})}
 function keyPos(keys,p,out){if(p<=keys[0][0]){out.set(keys[0][1],keys[0][2],keys[0][3]);return 0}
   for(let i=0;i<keys.length-1;i++){const a=keys[i],b=keys[i+1];if(p<=b[0]){const t=(p-a[0])/(b[0]-a[0]||1);out.set(a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t,a[3]+(b[3]-a[3])*t);return i}}
@@ -866,6 +972,8 @@ function buildJourney(){
   const lk=makeLocker();lk.position.set(944,0,20);root.add(lk);
   [[992,6,'#fde7d4','#e5484d'],[1006,6,'#e8eefc','#2f58db'],[1020,6,'#e9f7ef','#475569'],[992,-8,'#f4f6fb','#2f58db'],[1006,-8,'#fff3d6','#b45309'],[1020,-8,'#e8eefc','#e5484d'],[960,48,'#f4f6fb','#2f58db'],[976,48,'#fde7d4','#475569'],[992,48,'#e9f7ef','#e5484d'],[1008,48,'#e8eefc','#2f58db']].forEach(([x,z,c,rc])=>{const h=makeHouse(c,rc);h.position.set(x,0,z);if(z>40)h.rotation.y=Math.PI;root.add(h)});
   for(let i=0;i<22;i++){const t=makeTree(.8+r()*.5,r);t.position.set(880+r()*170,0,r()<.5?-18+r()*10:56+r()*12);root.add(t)}
+  buildDepotCampus(806,-50,4,2,404,{kinds:['terminal','hub','vans','branch','terminal','terminal'],link:[722,27]});
+  buildTown(-180,1150,77,{roadZ:32,rows:6,cars:18,oneWay:true});
   // heroes = the parcel's vehicles
   hero(makeTruck('#2f5be0'),[[0,8,0,34],[1,42,0,34],[1.6,64,0,34],[1.75,64,0,27],[2,64,0,13.6,1]],[0,2.6],[0,1.95]);
   hero(makePlane(),[[2,168,0,-10],[2.3,168,0,-48],[2.45,190,0,-58],[2.7,280,4,-58],[3,340,34,-58],[3.5,410,40,-58],[3.75,500,8,-58],[3.85,530,0,-58],[3.95,578,0,-48],[4.1,578,0,-10]],[2,4.6],[1.95,4.1],true);
@@ -1006,12 +1114,20 @@ function renderAlerts(){const al=entAlerts();$('alertMenu').innerHTML='<div clas
 function renderAll(){renderTop();renderSiteMenu();renderRoute();renderKPIs();renderDetail();renderShip();renderOps();refreshMarkers();refreshOps()}
 
 /* ---------- actions ---------- */
+function setDoor(dk){const k=dk.openK;if(!dk.door)return;dk.door.scale.y=Math.max(.06,1-k*.94);dk.door.position.y=2.4+2.2*(1-dk.door.scale.y);dk.glow.visible=k>.15}
+function stepDoors(dt){if(state.kind!=='wh')return;state.docks.forEach(dk=>{if(!dk.door)return;const t=dk.truck&&state.trucks.find(x=>x.id===dk.truck);
+  let want=0;if(t){if(t.state==='docked')want=1;else if(t.state==='arriving'){const e=ents[t.id];want=e&&e.obj.position.z<27&&e.obj.position.x<W/2?1:0}}
+  if(Math.abs(dk.openK-want)>.001){dk.openK+=Math.sign(want-dk.openK)*Math.min(Math.abs(want-dk.openK),dt*.55);setDoor(dk)}})}
 function assignDock(truckId,di){const t=state.trucks.find(x=>x.id===truckId);const e=ents[truckId];const dk=state.docks[di];if(dk.truck)return;
   t.state='arriving';t.dock=di;dk.truck=t.id;dk.lamp.material=M('#3b82f6',{emissive:'#3b82f6',emissiveIntensity:1});
   const x=dockX(di);const gx=W/2+9;
-  e.path=[{v:new THREE.Vector3(gx+3,0,30)},{v:new THREE.Vector3(gx,0,26.5),turn:3},{v:new THREE.Vector3(gx,0,19.5),turn:3},{v:new THREE.Vector3(x+10,0,18.5),turn:3},{v:new THREE.Vector3(x+1.5,0,13.5),rev:true,turn:2.2},{v:new THREE.Vector3(x,0,7.5),rev:true,turn:3}];
+  // smooth manoeuvre: pull past the dock, swing the nose out, then reverse in a straight line
+  const V3=(a,b)=>new THREE.Vector3(a,0,b);
+  const fw=new THREE.CatmullRomCurve3([V3(gx,26.5),V3(gx,22.5),V3(gx-3.5,20.2),V3(x+4,20.2),V3(x-3.5,22.4),V3(x-8.5,26.8)],false,'centripetal').getSpacedPoints(46);
+  const rv=new THREE.CatmullRomCurve3([V3(x-8.5,26.8),V3(x-4.6,23.6),V3(x-1.2,19.2),V3(x,15.2),V3(x,12)],false,'centripetal').getSpacedPoints(30);
+  e.path=[{v:V3(gx+3,30)}].concat(fw.slice(1).map(v=>({v,turn:14})),rv.slice(1).map(v=>({v,rev:true,turn:14,sp:3.6})),[{v:V3(x,9.6),rev:true,turn:20,sp:2.6,snap:true},{v:V3(x,7.5),rev:true,turn:20,sp:1.4,snap:true}]);
   e.speed=9;barrier(true);tween={t:0,dur:1.2,fromT:controls.target.clone(),toT:new THREE.Vector3(x+6,0,14),off:camera.position.clone().sub(controls.target),fromZ:camera.zoom,toZ:1.35};
-  e.onArrive=()=>{t.state='docked';t.op='Unloading';t.units=0;t.ship.step=4;barrier(false);dk.lamp.material=M('#f59e0b',{emissive:'#f59e0b',emissiveIntensity:1});toast(t.id+' docked at '+dk.id+' · unloading started');renderAll()};
+  e.onArrive=()=>{e.obj.position.set(x,0,7.5);e.obj.rotation.y=0;t.state='docked';t.op='Unloading';t.units=0;t.ship.step=4;barrier(false);dk.lamp.material=M('#f59e0b',{emissive:'#f59e0b',emissiveIntensity:1});toast(t.id+' docked at '+dk.id+' · unloading started');renderAll()};
   toast(dk.id+' assigned to '+t.id+' · gate opening','dock','#93c5fd');renderAll()}
 let barrierTarget=0;function barrier(open){barrierTarget=open?Math.PI/2.2:0}
 function sendToCharger(fid){const ci=freeCharger();if(ci<0)return;const f=state.fls.find(x=>x.id===fid);const e=ents[fid];
@@ -1072,6 +1188,7 @@ function placeLabel(el,pos,dy=0){v3.copy(pos).project(camera);const x=(v3.x+1)/2
 let tClock=0;
 function loop(){const dt=Math.min(clock.getDelta(),.05);
   movers.forEach(e=>stepMover(e,dt));
+  stepDoors(dt);
   if(state.kind==='air')stepAir(dt);
   if(state.kind==='journey')updateJourney(dt);
   state.fls.forEach(f=>{const e=ents[f.id];if(e&&e.path&&!movers.includes(e))stepMover(e,dt)});
