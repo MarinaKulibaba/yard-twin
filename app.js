@@ -52,7 +52,7 @@ function genSite(site){
   for(let i=0;i<cnt;i++){const s=SKUS[(i+site.seed)%SKUS.length];const low=s[0]==='Safety Helmet'||s[0]==='Foam Inserts';
     pallets.push({id:'PLT-'+(400+i*7+site.seed),type:'pallet',sku:s[0],qty:s[1],low,layers:low?1:2+Math.floor(r()*2),loc:'Staging '+String.fromCharCode(65+Math.floor(i/4))+(i%4+1),reorder:false})}
   if(site.id==='WH-04'){const lt=trucks.find(t=>t.op==='Loading');if(lt){lt.id='TRK-2311';lt.ship={id:'#SHP-78570',to:'AIR-01 Lakeside Air Cargo · YT 482',step:2};docks[lt.dock].truck=lt.id;fls.forEach(f=>{if(f.dock===lt.dock)f.truck=lt.id})}}
-  return {site,docks,trucks,fls,chargers,pallets};
+  const st={site,docks,trucks,fls,chargers,pallets};st.db=buildDB(st);return st;
 }
 
 /* ================= THREE SETUP ================= */
@@ -334,7 +334,7 @@ function attachMarker(id,hover=false){const e=ents[id];if(!e)return null;let mk;
 function select(id,focus=false,silent=false){
   if(marker){marker.parent&&marker.parent.remove(marker);marker=null}
   selected=id;if(id&&ents[id]){marker=attachMarker(id);if(focus)focusOn(id)}
-  renderDetail();renderShip();renderOps();refreshMarkers();if(!silent)hideHint();
+  renderDetail();renderShip();renderOps();refreshMarkers();if(!silent)hideHint();on3DSelect(id);
 }
 function setHover(id){if(id===hovered)return;if(hoverMarker){hoverMarker.parent&&hoverMarker.parent.remove(hoverMarker);hoverMarker=null}
   hovered=id;if(id&&id!==selected&&ents[id]&&!['warehouse','link'].includes(ents[id].type))hoverMarker=attachMarker(id,true);renderer.domElement.style.cursor=id?'pointer':'';refreshMarkers()}
@@ -928,7 +928,7 @@ plane:'<path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8
 const ic=(k,c='#0f172a',s=16,w=2)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${I[k]}</svg>`;
 const pill=(t,k)=>`<span class="pill ${k}">${t}</span>`;
 function opPill(op){return pill(op,{Loading:'success',Unloading:'success','Loading truck':'success',Charging:'warning','To charger':'info',Moving:'info',Available:'neutral',Docked:'success','At gate':'warning','En route':'info',Docking:'info'}[op]||'neutral')}
-function toast(msg,icon='check',c='#4ade80'){const t=document.createElement('div');t.className='toast';t.innerHTML=ic(icon,c,16)+msg;$('toasts').appendChild(t);setTimeout(()=>{t.style.transition='opacity .4s';t.style.opacity=0;setTimeout(()=>t.remove(),400)},3200)}
+function toast(msg,icon='check',c='#4ade80'){if(state&&state.db&&!/^(Saved|CSV ready)/.test(msg)&&icon!=='warn')OPS.log.unshift({t:Date.now(),msg});const t=document.createElement('div');t.className='toast';t.innerHTML=ic(icon,c,16)+msg;$('toasts').appendChild(t);setTimeout(()=>{t.style.transition='opacity .4s';t.style.opacity=0;setTimeout(()=>t.remove(),400)},3200)}
 
 function nextLeg(t){if(t.ship.to.includes('YT 482'))return {label:'AIR-01 · YT 482',short:'YT 482',buf:52};
   const n=parseInt(t.id.replace(/\D/g,''))||0;
@@ -977,7 +977,8 @@ function renderDetail(){const el=$('detail');if(state.kind==='journey'){el.class
   else if(e.type==='charger'){const f=d.fl&&state.fls.find(x=>x.id===d.fl);
     h=head('#dcfce7','bolt','#15803d','CHARGER · '+s.id,d.id,d.power)+
     `<div class="row-status">${pill(f?'In use':'Free',f?'warning':'success')}<span>${f?f.id+' · '+f.battery+'% · full in ~'+Math.max(5,Math.round((100-f.battery)*1.2))+' min':'Ready for next forklift'}</span></div>`+(f?batt(f.battery):'')+
-    kv('Sessions today',3+d.slot)+kv('Energy today',(41+d.slot*7)+' kWh')+kv('Zone','Charging bay A')+(f?`<button class="secondary" data-sel="${f.id}">Open ${f.id}</button>`:'')}
+    kv('Sessions today',3+d.slot)+kv('Energy today',(41+d.slot*7)+' kWh')+kv('Zone','Charging bay A')+(f?`<button class="secondary" data-sel="${f.id}">View ${f.id}</button>`:'')}
+  if(state.db&&recFor3D(selected))h+=`<button class="secondary" data-a="openrec" style="margin-top:8px">${ic('list','#0f172a',16)}Open record in Operations</button>`;
   el.innerHTML=h}
 function freeCharger(){return state.chargers.findIndex(c=>!c.fl)}
 
@@ -1002,7 +1003,7 @@ function renderOps(){if(state.kind==='journey')return renderOpsJourney();if(stat
   $('ops').innerHTML=`<div class="tabs"><div class="thumb" style="width:24px;height:24px;border-radius:6px;background:#eaf1ff">${ic('grid','#2563eb',14)}</div><div class="seg">${tabs.map(([n,c])=>`<button class="tab ${opsTab===n?'on':''}" data-tab="${n}">${n} <span>${c}</span></button>`).join('')}</div><div class="spacer"></div><span class="muted" style="font-size:11px">${s.name}</span></div><div class="opsrows">${rows}</div>`}
 
 function renderAlerts(){const al=entAlerts();$('alertMenu').innerHTML='<div class="dd-label">ALERTS · '+state.site.id+'</div>'+(al.length?al.map(a=>`<button class="dd-item" data-sel="${a.id}" data-focus="1"><div class="thumb" style="width:30px;height:30px;border-radius:8px;background:${a.lvl==='bad'?'#fee2e2':'#fef3c7'}">${ic('warn',a.lvl==='bad'?'#b91c1c':'#b45309',15)}</div><span><div style="font-weight:600">${a.title}</div><div class="site-meta">${a.sub}</div></span></button>`).join(''):'<div class="dd-item muted">All clear — no alerts</div>')}
-function renderAll(){renderTop();renderSiteMenu();renderRoute();renderKPIs();renderDetail();renderShip();renderOps();refreshMarkers()}
+function renderAll(){renderTop();renderSiteMenu();renderRoute();renderKPIs();renderDetail();renderShip();renderOps();refreshMarkers();refreshOps()}
 
 /* ---------- actions ---------- */
 function assignDock(truckId,di){const t=state.trucks.find(x=>x.id===truckId);const e=ents[truckId];const dk=state.docks[di];if(dk.truck)return;
@@ -1086,6 +1087,439 @@ function loop(){const dt=Math.min(clock.getDelta(),.05);
     if(!state.offline){const w=state.trucks.find(x=>x.state==='waiting');if(w&&Math.random()<.02){w.waitMin++;refreshMarkers();if(selected===w.id)renderDetail()}}}
   requestAnimationFrame(loop)}
 
+/* ================= OPS PLATFORM: shared data layer, modules, tables, drawers, 3D sync ================= */
+Object.assign(I,{chart:'<path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/>',dots:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',down:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 20h16"/>',cols:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+ edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',expand:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',list:'<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+ gate:'<path d="M3 21V5M21 21V5"/><path d="M3 9h18"/><path d="M7 9v4M11 9v4M15 9v4"/>',pin:'<path d="M12 22s7-7 7-12a7 7 0 0 0-14 0c0 5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/>'});
+const MIN=60000;const now0=()=>Date.now();
+const CARRIERS=['Northline','Bluepeak','Atlas Haul','Harbor Freight','Riverline Cargo'];
+const DRIVERS=['Owen Reyes','Ivy Chen','Sam Doyle','Nina Petrova','Arjun Mehta','Lea Novak'];
+const CARGO=['Consumer goods','Packaging materials','Safety equipment','Electronics','Food (ambient)','Spare parts'];
+const OPS={open:null,drawer:null,syncing:false,extra:[],ts:{},log:[],loading:false,err:null,ana:{range:'7',from:'',to:''},filt:{}};
+const fT=d=>{if(d==null)return '—';const t=new Date(d);const today=new Date().toDateString()===t.toDateString();return (today?'':t.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' ')+pad(t.getHours())+':'+pad(t.getMinutes())};
+const fDur=m=>{if(m==null||isNaN(m))return '—';m=Math.max(0,Math.round(m));return m>=60?Math.floor(m/60)+' h '+pad(m%60)+' min':m+' min'};
+const hx=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* ---------- data layer (mock, linked to the 3D scene state) ---------- */
+function buildDB(st){const s=st.site,r=rngOf(s.seed*13),N=now0();
+  const plate=()=>{const L='ABCEHKMOPTX';return L[Math.floor(r()*11)]+L[Math.floor(r()*11)]+' '+(1000+Math.floor(r()*8999))+' '+L[Math.floor(r()*11)]+L[Math.floor(r()*11)]};
+  const db={site:s.id,st,vehicles:[],shipments:[],pallets:[],equipment:[],docks:[],gates:[],tasks:[],zones:[],hist:[],seq:{shp:79300,task:1100,plt:900}};
+  db.zones=[{id:'Staging A',cap:4,in3d:true},{id:'Staging B',cap:8,in3d:true},{id:'Dock area',cap:24,in3d:false},{id:'Bulk storage',cap:60,in3d:false},{id:'Quarantine',cap:4,in3d:false}];
+  db.gates=[{id:'G1',type:'Entry gate',in3d:true,ov:null,log:[]},{id:'G2',type:'Exit gate',in3d:false,ov:null,log:[]}];
+  st.docks.forEach((d,i)=>db.docks.push({id:d.id,idx:i,type:'Dock',in3d:true,ov:null,sched:null,vOv:null,shOv:null,log:[{t:N-(200+i*30)*MIN,msg:'Dock cycle completed · '+CARRIERS[i%5]},{t:N-(420+i*25)*MIN,msg:'Inspection passed'}]}));
+  st.trucks.forEach((t,k)=>{const dir=t.op==='Loading'?'Outbound':'Inbound';const arr=t.state==='enroute'?null:N-(22+k*19)*MIN;
+    db.vehicles.push({id:t.id,reg:plate(),type:k%3===2?'Box truck 7.5 t':'Tractor + 13.6 m trailer',carrier:t.carrier,driver:t.driver,ref:t,in3d:true,arr,dep:null,shipment:t.ship.id,dockOv:null});
+    db.shipments.push({id:t.ship.id,dir,carrier:t.carrier,vehicle:t.id,cargo:CARGO[k%6],qty:t.total,unit:'pallets',eta:t.state==='enroute'?N+t.eta*MIN:N-(30+k*19)*MIN,etd:N+(dir==='Outbound'?45+k*12:80+k*12)*MIN,actual:arr,gate:'G1',dock:t.dock!=null?st.docks[t.dock].id:null,prio:t.state==='waiting'?'Urgent':k===0?'High':'Normal',ov:null,dest:t.ship.to,created:N-(600+k*40)*MIN})});
+  [['Scheduled',95,'Inbound'],['Delayed',-18,'Inbound'],['Departed',-45,'Outbound']].forEach(([stt,m,dir],k)=>{const id='TRK-'+(2510+k*37+Math.floor(r()*20));const shid='#SHP-'+(79100+k*37);
+    db.vehicles.push({id,reg:plate(),type:'Tractor + 13.6 m trailer',carrier:CARRIERS[(k+2)%5],driver:DRIVERS[k+2],ref:null,in3d:false,status:stt,loc:stt==='Departed'?'Left site via G2':'Off-site',arr:stt==='Departed'?N-190*MIN:null,dep:stt==='Departed'?N+m*MIN:null,shipment:shid,dockOv:null});
+    db.shipments.push({id:shid,dir,carrier:CARRIERS[(k+2)%5],vehicle:id,cargo:CARGO[(k+3)%6],qty:4+k*3,unit:'pallets',eta:N+m*MIN,etd:N+(m+90)*MIN,actual:stt==='Departed'?N-190*MIN:null,gate:stt==='Departed'?'G2':'G1',dock:null,prio:stt==='Delayed'?'High':'Normal',ov:stt==='Departed'?'Completed':stt==='Delayed'?'Delayed':'Scheduled',dest:dir==='Outbound'?'Newark, NJ':s.id,created:N-(900+k*60)*MIN})});
+  db.shipments.push({id:'#SHP-79205',dir:'Outbound',carrier:'Riverline Cargo',vehicle:null,cargo:null,qty:8,unit:'pallets',eta:N+150*MIN,etd:N+210*MIN,actual:null,gate:'G2',dock:null,prio:'Normal',ov:'Scheduled',dest:'Trenton, NJ',created:N-300*MIN});
+  db.shipments.push({id:'#SHP-79188',dir:'Inbound',carrier:'Atlas Haul',vehicle:null,cargo:'Spare parts',qty:3,unit:'pallets',eta:N+60*MIN,etd:N+120*MIN,actual:null,gate:'G1',dock:null,prio:'Low',ov:'Cancelled',dest:s.id,created:N-1300*MIN});
+  const occ=st.docks.find(d=>d.truck);const schd=db.shipments.find(x=>x.ov==='Scheduled'&&x.vehicle);if(occ&&schd)schd.dock=occ.id;
+  const inb=db.shipments.filter(x=>x.dir==='Inbound'&&!x.ov),outb=db.shipments.filter(x=>x.dir==='Outbound'&&!x.ov);
+  st.pallets.forEach((p,i)=>{const sh=inb[i%Math.max(1,inb.length)]||db.shipments[0];
+    db.pallets.push({id:p.id,ref:p,in3d:true,shipment:sh.id,desc:p.sku,type:sh.cargo||'General',qty:p.qty,weight:180+Math.floor(r()*620),zone:i<4?'Staging A':'Staging B',pos:(i<4?'A':'B')+'-'+pad(i%4+1),arr:N-(70+i*48)*MIN,status:'In Storage',ov:null})});
+  const addP=(sh,status,zone,pos,n)=>{for(let k=0;k<n;k++)db.pallets.push({id:'PLT-'+(db.seq.plt++),ref:null,in3d:false,shipment:sh.id,desc:sh.cargo?sh.cargo+' · lot '+(k+1):'Unspecified',type:sh.cargo||'—',qty:20+Math.floor(r()*80),weight:150+Math.floor(r()*700),zone,pos:pos+'-'+pad(k+1),arr:status==='Expected'?null:N-(30+k*12)*MIN,status,ov:null})};
+  outb.forEach(sh=>{const v=st.trucks.find(t=>t.id===sh.vehicle);addP(sh,'In Transit','Dock area',(sh.dock||'DA'),Math.min(3,v?v.units:2))});
+  inb.slice(0,2).forEach(sh=>addP(sh,'Received','Dock area',(sh.dock||'DA'),2));
+  const sc=db.shipments.find(x=>x.ov==='Scheduled'&&x.vehicle);if(sc)addP(sc,'Expected','—','EXP',3);
+  const dp=db.shipments.find(x=>x.ov==='Completed');if(dp)addP(dp,'Dispatched','—','OUT',2);
+  addP(inb[0]||db.shipments[0],'Damaged','Quarantine','Q',1);
+  for(let k=0;k<5;k++)db.pallets.push({id:'PLT-'+(db.seq.plt++),ref:null,in3d:false,shipment:(inb[k%Math.max(1,inb.length)]||db.shipments[0]).id,desc:CARGO[k%6]+' · bulk',type:CARGO[k%6],qty:40+k*12,weight:300+k*90,zone:'Bulk storage',pos:'R'+(k+1)+'-0'+(k%3+1),arr:N-(1440+k*300)*MIN,status:k===2?'Reserved':'In Storage',ov:null});
+  st.fls.forEach(f=>db.equipment.push({id:f.id,type:'Forklift',model:f.model,operator:f.operator==='—'?null:f.operator,ref:f,in3d:true,hours:900+Math.floor(r()*2300),maint:N+(6+Math.floor(r()*40))*1440*MIN,ov:null,mlog:[{t:N-62*1440*MIN,msg:'Scheduled service · brakes, hydraulics'},{t:N-140*1440*MIN,msg:'Battery check'}]}));
+  st.chargers.forEach(c=>db.equipment.push({id:c.id,type:'Charging station',model:c.power,operator:null,ref:c,in3d:true,hours:3100+Math.floor(r()*900),maint:N+(20+c.slot*9)*1440*MIN,ov:null,mlog:[{t:N-90*1440*MIN,msg:'Connector replaced'}]}));
+  db.equipment.push({id:'RT-01',type:'Reach truck',model:'Jungheinrich ETV 214',operator:null,ref:null,in3d:false,status:'Maintenance',batt:54,loc:'Workshop',hours:4120,maint:N+2*1440*MIN,ov:null,mlog:[{t:N-1*1440*MIN,msg:'Mast sensor fault · in repair'}]});
+  db.equipment.push({id:'PJ-02',type:'Electric pallet jack',model:'Linde T20',operator:null,ref:null,in3d:false,status:'Available',batt:77,loc:'Dock area',hours:1630,maint:N+33*1440*MIN,ov:null,mlog:[]});
+  db.equipment.push({id:'YT-01',type:'Yard tractor',model:'Kalmar T2',operator:'Arjun Mehta',ref:null,in3d:false,status:'Out of Service',batt:42,fuel:true,loc:'Gate G2 area',hours:6870,maint:N-1*1440*MIN,ov:null,mlog:[{t:N-40*MIN,msg:'Engine warning · stopped near G2'}]});
+  let tn=1100;const T=(type,desc,o)=>db.tasks.push(Object.assign({id:'T-'+(tn++),type,desc,shipment:null,vehicle:null,operator:null,prio:'Normal',created:N-(30+db.tasks.length*14)*MIN,due:N+(40+db.tasks.length*20)*MIN,status:'Open',auto:null},o));
+  st.trucks.filter(t=>t.state==='docked').forEach(t=>{const fl=st.fls.find(f=>f.truck===t.id);T(t.op==='Loading'?'Load':'Unload',`${t.op} ${t.total} pallets · ${t.id} at ${st.docks[t.dock].id}`,{shipment:t.ship.id,vehicle:t.id,operator:fl?fl.operator:null,status:'In Progress',prio:t.ship.id==='#SHP-78570'?'High':'Normal'})});
+  st.trucks.filter(t=>t.state==='waiting').forEach(t=>T('Assign dock',`Assign a free dock to ${t.id} waiting at G1`,{shipment:t.ship.id,vehicle:t.id,prio:'Urgent',auto:'dock:'+t.id}));
+  st.fls.filter(f=>f.battery<20).forEach(f=>T('Charge equipment',`Send ${f.id} to a free charger (${f.battery}%)`,{operator:f.operator,prio:'Urgent',auto:'charge:'+f.id}));
+  st.pallets.filter(p=>p.low).forEach(p=>T('Replenish',`Replenish ${p.sku} at ${p.loc}`,{prio:'Normal',auto:'reorder:'+p.id}));
+  const dmg=db.pallets.find(p=>p.status==='Damaged');if(dmg)T('Inspect damage',`Inspect ${dmg.id} in Quarantine`,{shipment:dmg.shipment,prio:'High',status:'Blocked'});
+  T('Complete shipment data','Cargo type and vehicle missing for #SHP-79205',{shipment:'#SHP-79205',prio:'Normal'});
+  T('Equipment repair','Tow YT-01 to workshop and diagnose',{operator:'Arjun Mehta',prio:'High',status:'Open'});
+  T('Yard check','Hourly safety walk · gates and docks',{operator:'Leo Garcia',prio:'Low',status:'Completed'});
+  const hr=rngOf(s.seed*31);const nd=s.docks;
+  for(let d=30;d>=1;d--){const arrivals=9+Math.floor(hr()*9);const delayed=Math.round(arrivals*(.04+hr()*.12));
+    db.hist.push({day:new Date(N-d*1440*MIN).setHours(12,0,0,0),inb:Math.round(arrivals*(.5+hr()*.15)),outb:6+Math.floor(hr()*9),arrivals,delayed,turn:68+hr()*44,load:34+hr()*22,occ:48+hr()*38,util:52+hr()*34,docks:[...Array(nd)].map(()=>35+hr()*55)})}
+  OPS.log=[{t:N-12*MIN,msg:'Check-in completed · '+(st.trucks[0]?.id||'')},{t:N-35*MIN,msg:'Dock assigned · '+(st.docks.find(d=>d.truck)?.id||'D1')},{t:N-58*MIN,msg:'Shipment created · #SHP-79205'},{t:N-95*MIN,msg:'Pallet moved to Quarantine · '+(dmg?dmg.id:'')}];
+  return db}
+const DB=()=>state&&state.db;
+const byId=(arr,id)=>arr.find(x=>x.id===id);
+function vStatus(v){if(v.ref){const t=v.ref;return t.state==='docked'?t.op:t.state==='waiting'?'At Gate':t.state==='enroute'?'Approaching':t.state==='arriving'?'On Yard':'On Yard'}return v.status}
+function vLoc(v){if(v.ref){const t=v.ref,d=DB().st.docks;return t.state==='docked'?'Dock '+d[t.dock].id:t.state==='waiting'?'Gate G1':t.state==='enroute'?'Approach road':'Yard → '+d[t.dock].id}return v.loc}
+function vDock(v){return v.ref&&v.ref.dock!=null?DB().st.docks[v.ref.dock].id:v.dockOv}
+function shStatus(s){if(s.ov)return s.ov;const v=s.vehicle&&byId(DB().vehicles,s.vehicle);if(!v)return 'Scheduled';const x=vStatus(v);
+  return {Loading:'Loading',Unloading:'Unloading','At Gate':'Waiting',Approaching:'Approaching','On Yard':'Check-in','At Dock':'Arrived',Departed:'Completed',Delayed:'Delayed',Scheduled:'Scheduled'}[x]||'Scheduled'}
+function shDock(s){const v=s.vehicle&&byId(DB().vehicles,s.vehicle);return (v&&vDock(v))||s.dock}
+function dVehicle(d){const t=DB().st.trucks.find(x=>x.dock===d.idx&&x.state!=='enroute');return t?t.id:d.vOv}
+function dStatus(d){if(d.ov)return d.ov;const t=DB().st.trucks.find(x=>x.dock===d.idx&&x.state!=='enroute');if(t)return t.state==='arriving'?'Reserved':t.op;if(d.vOv)return 'Occupied';if(d.sched)return 'Reserved';return 'Available'}
+function gStatus(g){if(g.ov)return g.ov;if(g.id==='G1'){const w=DB().st.trucks.find(t=>t.state==='waiting');return w?'Occupied':'Available'}return 'Available'}
+function eStatus(e){if(e.ov)return e.ov;if(e.ref){if(e.type==='Charging station')return e.ref.fl?'In Use':'Available';const o=e.ref.op;return o==='Charging'?'Charging':o==='Available'?'Available':'In Use'}return e.status}
+function eBatt(e){return e.type==='Charging station'?null:e.ref?e.ref.battery:e.batt}
+function eLoc(e){if(e.ref){if(e.type==='Charging station')return 'Charging bay A';const f=e.ref,d=DB().st.docks;return f.op==='Charging'?'Charger '+f.charger:f.op==='To charger'?'→ Charger '+f.charger:f.dock!=null?'Dock '+d[f.dock].id+' lane':'Staging'}return e.loc}
+function eOper(e){return e.operator}
+function pStatus(p){return p.ov||p.status}
+function zoneUse(z){return DB().pallets.filter(p=>p.zone===z&&!['Dispatched','Expected'].includes(pStatus(p))).length}
+function shPallets(id){return DB().pallets.filter(p=>p.shipment===id)}
+function shTasks(id){return DB().tasks.filter(t=>t.shipment===id)}
+const ACTIVE_SH=['Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Delayed'];
+function alertsOps(){const db=DB(),a=[];
+  db.shipments.forEach(s=>{const st=shStatus(s);if(st==='Delayed')a.push({type:'Delayed Arrival',sev:'bad',title:s.id+' delayed',sub:`${s.carrier} · ETA ${fT(s.eta)}`,t:'shipment',id:s.id});
+    if(st==='Scheduled'&&s.dock){const d=byId(db.docks,s.dock);if(d&&['Loading','Unloading','Occupied','Reserved'].includes(dStatus(d)))a.push({type:'Dock Conflict',sev:'warn',title:`${s.dock} double-booked`,sub:`${s.id} scheduled ${fT(s.eta)} while ${s.dock} is ${dStatus(d).toLowerCase()}`,t:'dock',id:s.dock})}
+    if(!['Cancelled','Completed'].includes(st)&&(!s.cargo||!s.vehicle))a.push({type:'Missing Shipment Information',sev:'warn',title:s.id+' incomplete',sub:(!s.cargo?'Cargo type':'')+(!s.cargo&&!s.vehicle?' and ':'')+(!s.vehicle?'vehicle':'')+' missing',t:'shipment',id:s.id})});
+  db.equipment.forEach(e=>{const st=eStatus(e),b=eBatt(e);if(st==='Out of Service')a.push({type:'Equipment Failure',sev:'bad',title:e.id+' out of service',sub:e.type+' · '+(e.mlog[0]?.msg||''),t:'equipment',id:e.id});
+    if(b!=null&&b<20&&!['Charging'].includes(st)&&!(e.ref&&e.ref.op==='To charger'))a.push({type:'Low Battery',sev:'bad',title:`${e.id} battery ${b}%`,sub:e.type+' · '+eLoc(e),t:'equipment',id:e.id})});
+  db.zones.forEach(z=>{const u=zoneUse(z.id);if(u/z.cap>=.85)a.push({type:'Storage Capacity Warning',sev:'warn',title:`${z.id} ${Math.round(u/z.cap*100)}% full`,sub:`${u} of ${z.cap} positions used`,t:'zone',id:z.id})});
+  return a}
+function opsTick(){const db=DB();if(!db)return;let ch=false;
+  db.tasks.forEach(t=>{if(!t.auto||['Completed','Cancelled'].includes(t.status))return;const [k,id]=t.auto.split(':');let done=false;
+    if(k==='dock'){const tr=db.st.trucks.find(x=>x.id===id);done=tr&&tr.state!=='waiting'}
+    if(k==='charge'){const f=db.st.fls.find(x=>x.id===id);done=f&&['Charging','To charger'].includes(f.op)}
+    if(k==='reorder'){const p=db.st.pallets.find(x=>x.id===id);done=p&&p.reorder}
+    if(done){t.status='Completed';ch=true;OPS.log.unshift({t:now0(),msg:`Task ${t.id} completed automatically · ${t.type}`})}});
+  return ch}
+/* ---------- reusable table ---------- */
+function tsOf(k,def){return OPS.ts[k]||(OPS.ts[k]=Object.assign({q:'',f:{},sort:null,dir:1,page:0,size:10,sel:new Set(),hidden:new Set(),act:null},def||{}))}
+function prioHTML(p){const c={Low:'#94a3b8',Normal:'#3b82f6',High:'#f59e0b',Urgent:'#dc2626'}[p]||'#94a3b8';return `<span class="prio"><i style="background:${c}"></i>${p}</span>`}
+const STATUS_TONE={Scheduled:'neutral',Approaching:'info',Arrived:'info','Check-in':'info',Waiting:'warning',Loading:'success',Unloading:'success',Completed:'neutral',Delayed:'danger',Cancelled:'neutral',
+ 'On Yard':'info','At Gate':'warning','At Dock':'info',Departed:'neutral',Expected:'neutral',Received:'info','In Storage':'success',Reserved:'warning','In Transit':'info',Dispatched:'neutral',Damaged:'danger',
+ Available:'success','In Use':'info',Charging:'warning',Maintenance:'warning','Out of Service':'danger',Occupied:'info',Blocked:'danger',Open:'neutral','In Progress':'info'};
+const sb=s=>pill(s,STATUS_TONE[s]||'neutral');
+function applyTable(rows,cfg,ts){let r=rows;const q=ts.q.trim().toLowerCase();
+  if(q)r=r.filter(x=>cfg.search(x).toLowerCase().includes(q));
+  (cfg.filters||[]).forEach(f=>{const v=ts.f[f.k];if(!v)return;r=r.filter(x=>{const val=f.get(x);if(v.startsWith('@'))return (f.groups[v]||[]).includes(val);return val===v})});
+  if(ts.sort){const c=cfg.cols.find(c=>c.k===ts.sort);if(c){const g=c.sv||c.v;r=[...r].sort((a,b)=>{const A=g(a),B=g(b);return (A==null?1:B==null?-1:A>B?1:A<B?-1:0)*ts.dir})}}
+  return r}
+function tableHTML(key,rows,cfg){const ts=tsOf(key);const all=applyTable(rows,cfg,ts);const pages=Math.max(1,Math.ceil(all.length/ts.size));ts.page=Math.min(ts.page,pages-1);
+  const pg=all.slice(ts.page*ts.size,ts.page*ts.size+ts.size);const cols=cfg.cols.filter(c=>!ts.hidden.has(c.k));
+  const tb=cfg.toolbar===false?'':`<div class="tt"><div class="ts">${ic('search','#64748b',14)}<input data-tq="${key}" value="${hx(ts.q)}" placeholder="${cfg.ph||'Search'}"></div>
+   ${(cfg.filters||[]).map(f=>`<select data-tf="${key}:${f.k}"><option value="">${f.label}: all</option>${Object.keys(f.groups||{}).map(g=>`<option value="${g}" ${ts.f[f.k]===g?'selected':''}>${f.groupLabels[g]}</option>`).join('')}${f.opts.map(o=>`<option ${ts.f[f.k]===o?'selected':''}>${o}</option>`).join('')}</select>`).join('')}
+   <div class="spacer"></div><button class="btn" data-tcols="${key}" title="Columns">${ic('cols','#0f172a',14)}Columns</button><button class="btn" data-texp="${key}">${ic('down','#0f172a',14)}Export CSV</button>${cfg.primary?`<button class="btn pri" data-a="${cfg.primary.a}">${ic('plus','#fff',14)}${cfg.primary.label}</button>`:''}</div>`;
+  const bulk=ts.sel.size&&cfg.bulk?`<div class="bulk"><b>${ts.sel.size} selected</b><div class="spacer"></div>${cfg.bulk(key)}<button class="btn sm" data-texp="${key}" data-sel-only="1">Export selected</button><button class="btn sm" data-tclr="${key}">Clear</button></div>`:'';
+  const allChk=pg.length&&pg.every(r=>ts.sel.has(r.id));
+  const head=`<tr>${cfg.bulk?`<th class="cb nosort"><input type="checkbox" data-tall="${key}" ${allChk?'checked':''} aria-label="Select page"></th>`:''}${cols.map(c=>`<th class="${c.nosort?'nosort':''} ${ts.sort===c.k?'sorted':''}" data-tsort="${c.nosort?'':key+':'+c.k}">${c.label}<span class="sa">${ts.sort===c.k?(ts.dir>0?'↑':'↓'):'↕'}</span></th>`).join('')}<th class="nosort" style="width:34px"></th></tr>`;
+  const body=pg.length?pg.map(r=>`<tr class="${ts.act===r.id?'rsel':''} ${ts.sel.has(r.id)?'chk':''}" data-row="${cfg.type}:${hx(r.id)}">${cfg.bulk?`<td class="cb"><input type="checkbox" data-tsel="${key}:${hx(r.id)}" ${ts.sel.has(r.id)?'checked':''} aria-label="Select ${hx(r.id)}"></td>`:''}${cols.map(c=>`<td>${c.h?c.h(r):hx(c.v(r))}</td>`).join('')}<td><button class="rowm" data-tmenu="${cfg.type}:${hx(r.id)}" aria-label="Actions">${ic('dots','#64748b',14)}</button></td></tr>`).join('')
+    :`<tr><td colspan="${cols.length+2}"><div class="empty"><b>${rows.length?'No records match these filters':'No records yet'}</b>${rows.length?`Try another search or <span class="dlink" data-tclrf="${key}">clear filters</span>.`:''}</div></td></tr>`;
+  const foot=cfg.toolbar===false?'':`<div class="tfoot"><span>${all.length?ts.page*ts.size+1:0}–${Math.min(all.length,(ts.page+1)*ts.size)} of ${all.length}</span><select class="fsel" data-tsize="${key}">${[10,20,50].map(n=>`<option ${ts.size===n?'selected':''}>${n}</option>`).join('')}</select><button class="btn sm" data-tpage="${key}:-1" ${ts.page===0?'disabled':''}>‹ Prev</button><span>Page ${ts.page+1} / ${pages}</span><button class="btn sm" data-tpage="${key}:1" ${ts.page>=pages-1?'disabled':''}>Next ›</button></div>`;
+  return tb+bulk+`<div class="tbw"><table class="dt"><thead>${head}</thead><tbody>${body}</tbody></table></div>`+foot}
+/* ---------- module configs ---------- */
+const g3=x=>x.in3d?'<span class="tg3 y" title="Shown in the 3D scene">3D</span>':'<span class="tg3 n" title="Data only — not represented in 3D">data</span>';
+function CFG(type){const db=DB();
+  if(type==='shipments')return {type:'shipment',rows:()=>db.shipments,ph:'Search ID, vehicle or carrier',search:s=>[s.id,s.vehicle,s.carrier].join(' '),primary:{a:'newship',label:'New shipment'},
+    filters:[{k:'status',label:'Status',get:shStatus,opts:['Scheduled','Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Completed','Delayed','Cancelled'],groups:{'@active':ACTIVE_SH},groupLabels:{'@active':'Status: all active'}},
+     {k:'dir',label:'Direction',get:s=>s.dir,opts:['Inbound','Outbound']},{k:'prio',label:'Priority',get:s=>s.prio,opts:['Low','Normal','High','Urgent']},
+     {k:'date',label:'Date',get:s=>{const d=new Date(s.eta),t=new Date();return d.toDateString()===t.toDateString()?'Today':d>t?'Upcoming':'Earlier'},opts:['Today','Upcoming','Earlier']}],
+    cols:[{k:'id',label:'Shipment ID',v:s=>s.id,h:s=>`<span class="idc">${hx(s.id)}</span>`},{k:'dir',label:'Direction',v:s=>s.dir},{k:'carrier',label:'Carrier',v:s=>s.carrier},
+     {k:'vehicle',label:'Vehicle',v:s=>s.vehicle||'—',h:s=>s.vehicle?hx(s.vehicle):'<span class="mut">Unassigned</span>'},{k:'cargo',label:'Cargo type',v:s=>s.cargo||'—',h:s=>s.cargo?hx(s.cargo):'<span class="mut">Missing</span>'},
+     {k:'qty',label:'Qty',v:s=>s.qty,h:s=>s.qty+' <span class="mut">plt</span>'},{k:'eta',label:'ETA / ETD',v:s=>s.dir==='Inbound'?s.eta:s.etd,h:s=>fT(s.dir==='Inbound'?s.eta:s.etd)},
+     {k:'gate',label:'Gate',v:s=>s.gate||'—'},{k:'dock',label:'Dock',v:s=>shDock(s)||'—'},{k:'prio',label:'Priority',v:s=>['Low','Normal','High','Urgent'].indexOf(s.prio),h:s=>prioHTML(s.prio)},{k:'status',label:'Status',v:shStatus,h:s=>sb(shStatus(s))}],
+    bulk:k=>`<select class="fsel" data-bulk="${k}:status"><option value="">Set status…</option>${['Scheduled','Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Completed','Delayed','Cancelled'].map(o=>`<option>${o}</option>`).join('')}</select>`,
+    menu:s=>[['view','View details'],['edit','Edit shipment'],['locate','Locate in 3D'],['st:Completed','Mark completed'],['st:Cancelled','Cancel shipment',1]]};
+  if(type==='vehicles')return {type:'vehicle',rows:()=>db.vehicles,ph:'Search vehicle, plate, carrier or driver',search:v=>[v.id,v.reg,v.carrier,v.driver,v.shipment].join(' '),
+    filters:[{k:'status',label:'Status',get:vStatus,opts:['Scheduled','Approaching','On Yard','At Gate','At Dock','Loading','Unloading','Departed','Delayed'],groups:{'@yard':['On Yard','At Gate','At Dock','Loading','Unloading']},groupLabels:{'@yard':'Status: on site'}},{k:'carrier',label:'Carrier',get:v=>v.carrier,opts:CARRIERS}],
+    cols:[{k:'id',label:'Vehicle ID',v:v=>v.id,h:v=>`<span class="idc">${hx(v.id)}</span>${g3(v)}`},{k:'reg',label:'Registration',v:v=>v.reg},{k:'type',label:'Type',v:v=>v.type},{k:'carrier',label:'Carrier',v:v=>v.carrier},{k:'driver',label:'Driver',v:v=>v.driver},
+     {k:'loc',label:'Location',v:vLoc},{k:'shipment',label:'Shipment',v:v=>v.shipment||'—'},{k:'dock',label:'Dock',v:v=>vDock(v)||'—'},{k:'arr',label:'Arrival',v:v=>v.arr,h:v=>fT(v.arr)},{k:'dep',label:'Departure',v:v=>v.dep,h:v=>fT(v.dep)},{k:'status',label:'Status',v:vStatus,h:v=>sb(vStatus(v))}],
+    bulk:()=>'',menu:v=>[['view','View details'],['locate','Locate in 3D'],['assigndock','Assign dock']]};
+  if(type==='inventory')return {type:'pallet',rows:()=>db.pallets,ph:'Search pallet or shipment ID',search:p=>[p.id,p.shipment,p.desc].join(' '),
+    filters:[{k:'zone',label:'Zone',get:p=>p.zone,opts:db.zones.map(z=>z.id).concat(['—'])},{k:'status',label:'Status',get:pStatus,opts:['Expected','Received','In Storage','Reserved','In Transit','Dispatched','Damaged'],groups:{'@yard':['Received','In Storage','Reserved','Damaged']},groupLabels:{'@yard':'Status: on yard'}}],
+    cols:[{k:'id',label:'Pallet ID',v:p=>p.id,h:p=>`<span class="idc">${hx(p.id)}</span>${g3(p)}`},{k:'shipment',label:'Shipment',v:p=>p.shipment},{k:'desc',label:'Cargo description',v:p=>p.desc},{k:'type',label:'Cargo type',v:p=>p.type},
+     {k:'qty',label:'Qty',v:p=>p.qty},{k:'weight',label:'Weight',v:p=>p.weight,h:p=>p.weight+' kg'},{k:'zone',label:'Zone',v:p=>p.zone},{k:'pos',label:'Position',v:p=>p.pos},
+     {k:'arr',label:'Arrival',v:p=>p.arr,h:p=>fT(p.arr)},{k:'dur',label:'Storage',v:p=>p.arr?now0()-p.arr:-1,h:p=>p.arr?fDur((now0()-p.arr)/MIN):'—'},{k:'status',label:'Status',v:pStatus,h:p=>sb(pStatus(p))}],
+    bulk:k=>`<select class="fsel" data-bulk="${k}:zone"><option value="">Move to zone…</option>${db.zones.map(z=>`<option>${z.id}</option>`).join('')}</select>`,menu:p=>[['view','View details'],['locate','Locate in 3D'],['move','Move to zone…']]};
+  if(type==='equipment')return {type:'equipment',rows:()=>db.equipment,ph:'Search equipment, model or operator',search:e=>[e.id,e.type,e.model,e.operator].join(' '),
+    filters:[{k:'type',label:'Type',get:e=>e.type,opts:[...new Set(db.equipment.map(e=>e.type))]},{k:'status',label:'Status',get:eStatus,opts:['Available','In Use','Charging','Maintenance','Out of Service']}],
+    cols:[{k:'id',label:'Equipment ID',v:e=>e.id,h:e=>`<span class="idc">${hx(e.id)}</span>${g3(e)}`},{k:'type',label:'Type',v:e=>e.type},{k:'model',label:'Model',v:e=>e.model},{k:'op',label:'Operator',v:e=>e.operator||'—',h:e=>e.operator?hx(e.operator):'<span class="mut">Unassigned</span>'},
+     {k:'loc',label:'Location',v:eLoc},{k:'batt',label:'Battery / fuel',v:e=>eBatt(e)??-1,h:e=>{const b=eBatt(e);return b==null?'<span class="mut">n/a</span>':`<span style="display:inline-flex;align-items:center;gap:6px"><span class="bar ${b<20?'red':b<40?'amber':''}" style="width:46px;height:5px;display:inline-block"><i style="width:${b}%"></i></span>${b}%${e.fuel?' fuel':''}</span>`}},
+     {k:'hours',label:'Hours',v:e=>e.hours,h:e=>e.hours.toLocaleString('en-US')+' h'},{k:'maint',label:'Next service',v:e=>e.maint,h:e=>{const od=e.maint<now0();return `<span style="${od?'color:#b91c1c;font-weight:600':''}">${new Date(e.maint).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}${od?' · overdue':''}</span>`}},{k:'status',label:'Status',v:eStatus,h:e=>sb(eStatus(e))}],
+    bulk:()=>'',menu:e=>[['view','View details'],['locate','Locate in 3D'],['eq:Maintenance','Send to maintenance'],['eq:','Return to service']]};
+  if(type==='docks'){const rows=()=>db.gates.map(g=>({...g,_g:1})).concat(db.docks);
+    return {type:'dock',rows,ph:'Search gate, dock, vehicle or shipment',search:d=>[d.id,d.type,d._g?'':dVehicle(d),d._g?'':dShip(d)].join(' '),
+    filters:[{k:'type',label:'Type',get:d=>d.type,opts:['Entry gate','Exit gate','Dock']},{k:'status',label:'Status',get:d=>d._g?gStatus(d):dStatus(d),opts:['Available','Reserved','Occupied','Loading','Unloading','Blocked','Maintenance']}],
+    cols:[{k:'id',label:'Gate / Dock',v:d=>d.id,h:d=>`<span class="idc">${d.id}</span>${g3(d)}`},{k:'type',label:'Type',v:d=>d.type},{k:'veh',label:'Vehicle',v:d=>d._g?gVeh(d):dVehicle(d)||'—'},{k:'sh',label:'Shipment',v:d=>d._g?(gVeh(d)!=='—'?byId(db.vehicles,gVeh(d))?.shipment:'—'):dShip(d)||'—'},
+     {k:'sched',label:'Scheduled',v:d=>d._g?null:dSched(d),h:d=>d._g?'—':fT(dSched(d))},{k:'act',label:'Actual arrival',v:d=>d._g?null:dActual(d),h:d=>d._g?'—':fT(dActual(d))},
+     {k:'op',label:'Operation',v:d=>d._g?(d.type==='Entry gate'?'Check-in':'Check-out'):dOp(d)},{k:'dur',label:'Duration',v:d=>dDur(d)??-1,h:d=>fDur(dDur(d))},{k:'status',label:'Status',v:d=>d._g?gStatus(d):dStatus(d),h:d=>sb(d._g?gStatus(d):dStatus(d))}],
+    bulk:()=>'',menu:d=>[['view','View details'],['locate','Locate in 3D'],['blk:Blocked','Block'],['blk:Maintenance','Set maintenance'],['blk:','Clear block / maintenance']]}}
+  if(type==='tasks')return {type:'task',rows:()=>db.tasks,ph:'Search task, shipment, vehicle or operator',search:t=>[t.id,t.type,t.desc,t.shipment,t.vehicle,t.operator].join(' '),primary:{a:'newtask',label:'New task'},
+    filters:[{k:'status',label:'Status',get:t=>t.status,opts:['Open','In Progress','Blocked','Completed','Cancelled'],groups:{'@open':['Open','In Progress','Blocked']},groupLabels:{'@open':'Status: not done'}},{k:'prio',label:'Priority',get:t=>t.prio,opts:['Low','Normal','High','Urgent']}],
+    cols:[{k:'id',label:'Task ID',v:t=>t.id,h:t=>`<span class="idc">${t.id}</span>`},{k:'type',label:'Type',v:t=>t.type},{k:'desc',label:'Description',v:t=>t.desc},{k:'sh',label:'Shipment',v:t=>t.shipment||'—'},{k:'veh',label:'Vehicle',v:t=>t.vehicle||'—'},
+     {k:'op',label:'Operator',v:t=>t.operator||'—',h:t=>t.operator?hx(t.operator):'<span class="mut">Unassigned</span>'},{k:'prio',label:'Priority',v:t=>['Low','Normal','High','Urgent'].indexOf(t.prio),h:t=>prioHTML(t.prio)},
+     {k:'created',label:'Created',v:t=>t.created,h:t=>fT(t.created)},{k:'due',label:'Due',v:t=>t.due,h:t=>{const od=t.due<now0()&&!['Completed','Cancelled'].includes(t.status);return `<span style="${od?'color:#b91c1c;font-weight:600':''}">${fT(t.due)}</span>`}},{k:'status',label:'Status',v:t=>t.status,h:t=>sb(t.status)}],
+    bulk:k=>`<select class="fsel" data-bulk="${k}:op"><option value="">Assign to…</option>${OPERATORS.map(o=>`<option>${o}</option>`).join('')}</select><button class="btn sm" data-bulkdo="${k}:complete">Complete</button>`,
+    menu:t=>[['view','View details'],['tk:In Progress','Start'],['tk:Completed','Complete'],['tk:Blocked','Mark blocked'],['tk:Cancelled','Cancel',1]]};}
+function dTruck(d){return DB().st.trucks.find(x=>x.dock===d.idx&&x.state!=='enroute')}
+function dShip(d){const t=dTruck(d);if(t)return t.ship.id;if(d.shOv)return d.shOv;const s=DB().shipments.find(x=>x.dock===d.id&&shStatus(x)==='Scheduled');return s?s.id:null}
+function dSched(d){const t=dTruck(d);if(t){const s=byId(DB().shipments,t.ship.id);return s?s.eta:null}if(d.sched)return d.sched;const s=DB().shipments.find(x=>x.dock===d.id&&shStatus(x)==='Scheduled');return s?s.eta:null}
+function dActual(d){const t=dTruck(d);if(!t)return null;const v=byId(DB().vehicles,t.id);return v?v.arr:null}
+function dOp(d){const t=dTruck(d);return t?(t.state==='arriving'?'Docking':t.op):d.vOv?'Occupied':'—'}
+function dDur(d){if(d._g){const w=DB().st.trucks.find(t=>t.state==='waiting');return d.id==='G1'&&w?w.waitMin:null}const a=dActual(d);return a?(now0()-a)/MIN:null}
+function gVeh(g){if(g.id!=='G1')return '—';const w=DB().st.trucks.find(t=>t.state==='waiting');return w?w.id:'—'}
+/* ---------- shell: rail, workspace, drawer, popover, modal ---------- */
+const MODS=[['overview','Overview','grid'],['shipments','Shipments','box'],['vehicles','Vehicles','truck'],['inventory','Inventory','list'],['equipment','Equipment','fork'],['docks','Gates & Docks','gate'],['tasks','Tasks & Alerts','warn'],['analytics','Analytics','chart']];
+(function mountShell(){const rail=document.createElement('nav');rail.id='rail';rail.className='ui';rail.setAttribute('aria-label','Operations navigation');document.body.appendChild(rail);
+  const ws=document.createElement('section');ws.id='ws';ws.className='ui card';ws.setAttribute('aria-live','polite');document.body.appendChild(ws);
+  const dw=document.createElement('aside');dw.id='drawer';dw.className='ui card';dw.setAttribute('aria-label','Record details');document.body.appendChild(dw);
+  const pop=document.createElement('div');pop.id='pop';document.body.appendChild(pop);
+  const md=document.createElement('div');md.id='modal';md.innerHTML='<div class="mc card" role="dialog" aria-modal="true"></div>';document.body.appendChild(md)})();
+function renderRail(){const a=DB()?alertsOps().length:0;const openT=DB()?DB().tasks.filter(t=>['Open','In Progress','Blocked'].includes(t.status)).length:0;
+  $('rail').innerHTML=`<button class="rbtn ${!OPS.open?'on':''}" data-mod="" title="3D yard view">${ic('pin',!OPS.open?'#2563eb':'#475569',18)}3D Yard</button><div class="rsep"></div>`+
+  MODS.map(([k,l,i])=>`<button class="rbtn ${OPS.open===k?'on':''}" data-mod="${k}" title="${l}"><span class="rb">${ic(i,OPS.open===k?'#2563eb':'#475569',18)}${k==='tasks'&&a?`<i>${a}</i>`:''}</span>${l.replace(' & ','<br>& ')}</button>`).join('')}
+function openModule(k,preset){if(!DB())return;if(OPS.drawer&&k!==OPS.open){closeDrawer();clearExtra()}OPS.open=k||null;document.body.classList.toggle('ws',!!OPS.open);
+  if(preset){const ts=tsOf(k);ts.f=Object.assign({},preset);ts.page=0;ts.q=''}
+  if(!OPS.open){closeDrawer();clearExtra();camera.clearViewOffset();camera.updateProjectionMatrix();renderRail();return}
+  OPS.loading=true;renderWS();setTimeout(()=>{OPS.loading=false;renderWS()},220);applyOffset();renderRail()}
+function applyOffset(){if(!OPS.open){camera.clearViewOffset();camera.updateProjectionMatrix();return}const w=$('ws').getBoundingClientRect().right;const dr=$('drawer').classList.contains('open')?$('drawer').getBoundingClientRect().width+12:0;
+  if(innerWidth<1100){camera.clearViewOffset();camera.updateProjectionMatrix();return}
+  camera.setViewOffset(innerWidth,innerHeight,-(w-dr)/2,0,innerWidth,innerHeight);camera.updateProjectionMatrix()}
+addEventListener('resize',()=>{if(OPS.open)applyOffset()});
+const MODSUB={overview:'Operational snapshot of the yard',shipments:'Inbound and outbound shipments',vehicles:'Trucks and trailers on and around the yard',inventory:'Pallets and cargo on the yard',equipment:'Forklifts, chargers and yard equipment',docks:'Entrances and loading / unloading docks',tasks:'Operational tasks and alerts',analytics:'Performance metrics'};
+function renderWS(){if(!OPS.open||!DB())return;const m=MODS.find(x=>x[0]===OPS.open);const keepScroll=$('ws').querySelector('.wsb')?.scrollTop||0;const focusQ=document.activeElement?.dataset?.tq;const caret=document.activeElement?.selectionStart;
+  let body='';
+  if(OPS.loading)body=`<div class="pnl">${[...Array(6)].map(()=>`<div class="skel" style="margin:12px 0;width:${60+Math.random()*40}%"></div>`).join('')}</div>`;
+  else{try{body=OPS.open==='overview'?overviewHTML():OPS.open==='analytics'?analyticsHTML():OPS.open==='tasks'?tasksHTML():tableHTML(OPS.open,CFG(OPS.open).rows(),CFG(OPS.open))}
+    catch(err){console.error(err);body=`<div class="errbox"><b>Could not load ${m[1]}.</b> ${hx(err.message)}<div style="margin-top:8px"><button class="btn sm" data-mod="${OPS.open}">Retry</button></div></div>`}}
+  $('ws').innerHTML=`<div class="wsh"><div class="thumb" style="width:34px;height:34px;background:#eaf1ff">${ic(m[2],'#2563eb',18)}</div><div><h2>${m[1]}</h2><div class="sub">${MODSUB[m[0]]} · ${state.site.id} ${state.site.name}</div></div><div class="spacer"></div><span class="mockbadge" title="No backend is connected">Demo data · not live</span><button class="btn" data-a="fullyard">${ic('expand','#0f172a',14)}Full yard</button><button class="btn" data-mod="" aria-label="Close workspace">${ic('x','#0f172a',14)}</button></div><div class="wsb">${body}</div>`;
+  const b=$('ws').querySelector('.wsb');if(b)b.scrollTop=keepScroll;if(focusQ){const i=$('ws').querySelector(`[data-tq="${focusQ}"]`);if(i){i.focus();try{i.setSelectionRange(caret,caret)}catch(e){}}}}
+/* ---------- overview ---------- */
+function overviewHTML(){const db=DB();const sh=db.shipments;const al=alertsOps();
+  const veh=db.vehicles.filter(v=>!['Departed'].includes(vStatus(v)));const act=sh.filter(s=>ACTIVE_SH.includes(shStatus(s)));const onYard=db.pallets.filter(p=>['Received','In Storage','Reserved','Damaged'].includes(pStatus(p)));
+  const freeD=db.docks.filter(d=>dStatus(d)==='Available');const actE=db.equipment.filter(e=>eStatus(e)==='In Use');const del=sh.filter(s=>shStatus(s)==='Delayed');
+  const K=[['truck','Total vehicles',veh.length,`${db.vehicles.filter(v=>v.in3d).length} in 3D · excl. departed`,'vehicles',{}],['box','Active shipments',act.length,`${sh.length} total today`,'shipments',{status:'@active'}],
+    ['list','Pallets on yard',onYard.length,`${db.zones.reduce((a,z)=>a+z.cap,0)} positions`,'inventory',{status:'@yard'}],['dock','Available docks',freeD.length+' / '+db.docks.length,'ready now','docks',{status:'Available'}],
+    ['fork','Active equipment',actE.length+' / '+db.equipment.length,'in use now','equipment',{status:'In Use'}],['clock','Delayed shipments',del.length,del.length?'needs attention':'all on schedule','shipments',{status:'Delayed'}]];
+  const recent=[...sh].sort((a,b)=>Math.abs(a.eta-now0())-Math.abs(b.eta-now0())).slice(0,6);
+  const occD=db.docks.filter(d=>dStatus(d)!=='Available').length;
+  return `<div class="kg">${K.map(([i,l,v,s,mod,f],n)=>`<button class="kc ${n===5&&del.length?'warn':''}" data-kpi="${mod}" data-kf='${JSON.stringify(f)}'><div class="kl">${ic(i,'#2563eb',14)}${l}</div><div class="kv">${v}</div><div class="ks">${s} →</div></button>`).join('')}</div>
+  <div class="g2"><div><div class="pnl"><h3>Recent shipments<span class="r"><span class="dlink" data-mod="shipments">View all →</span></span></h3>${tableHTML('ov-sh',recent,Object.assign({},CFG('shipments'),{toolbar:false,bulk:null,cols:CFG('shipments').cols.filter(c=>['id','dir','vehicle','eta','dock','status'].includes(c.k))}))}</div>
+   <div class="pnl"><h3>Recent activity<span class="r">this session</span></h3>${OPS.log.slice(0,7).map(l=>`<div class="al" style="cursor:default"><div class="ai" style="background:#f1f5f9">${ic('clock','#64748b',13)}</div><div>${hx(l.msg)}<small>${fT(l.t)}</small></div></div>`).join('')}</div></div>
+  <div><div class="pnl"><h3>Active alerts<span class="r">${al.length}</span></h3>${al.length?al.slice(0,6).map(alertRow).join(''):'<div class="empty"><b>No active alerts</b></div>'}${al.length>6?`<div class="al"><span class="dlink" data-mod="tasks">+${al.length-6} more →</span></div>`:''}</div>
+   <div class="pnl"><h3>Yard occupancy</h3><div class="occ"><span>Docks</span><div class="bar blue"><i style="width:${occD/db.docks.length*100}%"></i></div><b>${occD}/${db.docks.length}</b></div>
+   ${db.zones.map(z=>{const u=zoneUse(z.id),p=u/z.cap;return `<div class="occ"><span>${z.id}</span><div class="bar ${p>=.85?'red':p>=.6?'amber':''}"><i style="width:${Math.min(100,p*100)}%"></i></div><b>${u}/${z.cap}</b></div>`}).join('')}</div>
+   <div class="pnl"><h3>Quick access</h3><div class="qa">${MODS.slice(1).map(([k,l,i])=>`<button data-mod="${k}">${ic(i,'#2563eb',18)}${l}</button>`).join('')}</div></div></div></div>`}
+function alertRow(a){return `<div class="al" data-open="${a.t}:${hx(a.id)}"><div class="ai" style="background:${a.sev==='bad'?'#fee2e2':'#fef3c7'}">${ic('warn',a.sev==='bad'?'#b91c1c':'#b45309',13)}</div><div><b style="font-weight:600">${hx(a.title)}</b><small>${a.type} · ${hx(a.sub)}</small></div></div>`}
+function tasksHTML(){const al=alertsOps();return `<div class="pnl"><h3>Active alerts<span class="r">${al.length} · calculated from current records</span></h3>${al.length?al.map(alertRow).join(''):'<div class="empty"><b>No active alerts</b></div>'}</div>`+tableHTML('tasks',CFG('tasks').rows(),CFG('tasks'))}
+/* ---------- analytics (from current records + generated demo history) ---------- */
+function anaDays(){const db=DB(),R=OPS.ana;const N=now0();let days=db.hist;
+  if(R.range==='today')days=[];else if(R.range==='7')days=db.hist.slice(-6);else if(R.range==='30')days=db.hist.slice(-29);
+  else{const f=R.from?new Date(R.from).getTime():0,t=R.to?new Date(R.to).getTime()+86399999:N;days=db.hist.filter(d=>d.day>=f&&d.day<=t)}
+  const sh=db.shipments.filter(s=>new Date(s.eta).toDateString()===new Date().toDateString());const yardV=db.vehicles.filter(v=>v.arr&&!v.dep);
+  const docked=db.st.trucks.filter(t=>t.state==='docked');
+  const today={day:N,today:true,inb:sh.filter(s=>s.dir==='Inbound'&&shStatus(s)!=='Cancelled').length,outb:sh.filter(s=>s.dir==='Outbound'&&shStatus(s)!=='Cancelled').length,
+    arrivals:db.vehicles.filter(v=>v.arr).length,delayed:db.shipments.filter(s=>shStatus(s)==='Delayed').length,
+    turn:yardV.length?yardV.reduce((a,v)=>a+(N-v.arr)/MIN,0)/yardV.length:null,load:docked.length?docked.reduce((a,t)=>a+(N-(byId(db.vehicles,t.id)?.arr||N))/MIN,0)/docked.length:null,
+    occ:db.docks.filter(d=>dStatus(d)!=='Available').length/db.docks.length*100,util:db.equipment.filter(e=>eStatus(e)==='In Use').length/db.equipment.filter(e=>!['Maintenance','Out of Service'].includes(eStatus(e))).length*100,
+    docks:db.docks.map(d=>dStatus(d)==='Available'?0:100)};
+  const inc=R.range!=='custom'||(!R.to||new Date(R.to).toDateString()===new Date().toDateString());
+  return inc?days.concat([today]):days}
+function avg(a,k){const v=a.map(x=>x[k]).filter(x=>x!=null);return v.length?v.reduce((s,x)=>s+x,0)/v.length:null}
+function lineSVG(days){const W=900,H=230,P=34;if(!days.length)return '<div class="empty"><b>No data in this range</b></div>';const mx=Math.max(4,...days.map(d=>Math.max(d.inb,d.outb)));
+  const X=i=>P+(days.length===1?(W-2*P)/2:i*(W-2*P)/(days.length-1)),Y=v=>H-P-v/mx*(H-2*P);
+  const path=k=>days.map((d,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(d[k]).toFixed(1)).join(' ');
+  const lbl=days.map((d,i)=>i%Math.ceil(days.length/7)===0||i===days.length-1?`<text x="${X(i)}" y="${H-10}" text-anchor="middle" font-size="10" fill="#94a3b8">${d.today?'Today':new Date(d.day).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</text>`:'').join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Daily inbound and outbound shipments">${[0,.5,1].map(f=>`<line x1="${P}" x2="${W-P}" y1="${Y(mx*f)}" y2="${Y(mx*f)}" stroke="#eef2f7"/><text x="${P-6}" y="${Y(mx*f)+3}" text-anchor="end" font-size="10" fill="#94a3b8">${Math.round(mx*f)}</text>`).join('')}
+   <path d="${path('inb')}" fill="none" stroke="#2563eb" stroke-width="2.2"/><path d="${path('outb')}" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-dasharray="5 3"/>${days.map((d,i)=>`<circle cx="${X(i)}" cy="${Y(d.inb)}" r="2.6" fill="#2563eb"><title>${d.today?'Today':new Date(d.day).toDateString()} · inbound ${d.inb}, outbound ${d.outb}</title></circle>`).join('')}${lbl}</svg>`}
+function barSVG(vals,labels){const W=600,H=190,P=40,bw=(W-2*P)/vals.length*.6;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Average dock utilization">${[0,50,100].map(v=>`<line x1="${P}" x2="${W-P}" y1="${H-P-v/100*(H-2*P)}" y2="${H-P-v/100*(H-2*P)}" stroke="#eef2f7"/><text x="${P-5}" y="${H-P-v/100*(H-2*P)+3}" text-anchor="end" font-size="10" fill="#94a3b8">${v}%</text>`).join('')}
+   ${vals.map((v,i)=>{const x=P+(i+.5)*(W-2*P)/vals.length-bw/2,h=v/100*(H-2*P);return `<rect x="${x}" y="${H-P-h}" width="${bw}" height="${h}" rx="4" fill="${v>=85?'#f59e0b':'#2563eb'}"><title>${labels[i]} · ${Math.round(v)}%</title></rect><text x="${x+bw/2}" y="${H-P-h-5}" text-anchor="middle" font-size="10" fill="#0f172a" font-weight="600">${Math.round(v)}%</text><text x="${x+bw/2}" y="${H-8}" text-anchor="middle" font-size="10" fill="#64748b">${labels[i]}</text>`}).join('')}</svg>`}
+function donutSVG(counts){const tot=Object.values(counts).reduce((a,b)=>a+b,0);const C={Scheduled:'#94a3b8',Approaching:'#60a5fa',Arrived:'#3b82f6','Check-in':'#1d4ed8',Waiting:'#f59e0b',Loading:'#16a34a',Unloading:'#22c55e',Completed:'#cbd5e1',Delayed:'#dc2626',Cancelled:'#e2e8f0'};
+  let off=0;const r=54,c=2*Math.PI*r;const segs=Object.entries(counts).filter(([,n])=>n).map(([k,n])=>{const len=n/tot*c;const s=`<circle r="${r}" cx="80" cy="80" fill="none" stroke="${C[k]}" stroke-width="22" stroke-dasharray="${len} ${c-len}" stroke-dashoffset="${-off}" transform="rotate(-90 80 80)"><title>${k}: ${n}</title></circle>`;off+=len;return s}).join('');
+  return `<div style="display:flex;gap:14px;align-items:center"><svg viewBox="0 0 160 160" width="150" role="img" aria-label="Shipments by status">${segs}<text x="80" y="78" text-anchor="middle" font-size="22" font-weight="700">${tot}</text><text x="80" y="96" text-anchor="middle" font-size="10" fill="#64748b">shipments</text></svg>
+   <div class="legend" style="flex-direction:column;gap:5px">${Object.entries(counts).filter(([,n])=>n).map(([k,n])=>`<span><i style="background:${C[k]}"></i>${k} · ${n}</span>`).join('')}</div></div>`}
+function analyticsHTML(){const db=DB(),R=OPS.ana;const days=anaDays();
+  const arr=days.reduce((a,d)=>a+d.arrivals,0),del=days.reduce((a,d)=>a+d.delayed,0);
+  const K=[['Avg vehicle turnaround',fDur(avg(days,'turn'))],['Avg loading / unloading',fDur(avg(days,'load'))],['On-time arrival rate',arr?Math.round((arr-del)/arr*1000)/10+'%':'—'],['Yard occupancy rate',avg(days,'occ')!=null?Math.round(avg(days,'occ'))+'%':'—'],['Equipment utilization',avg(days,'util')!=null?Math.round(avg(days,'util'))+'%':'—'],['Delayed shipments',String(del)]];
+  const dockAvg=db.docks.map((d,i)=>avg(days.map(x=>({v:x.docks[i]})),'v')||0);
+  const counts={};['Scheduled','Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Completed','Delayed','Cancelled'].forEach(k=>counts[k]=0);db.shipments.forEach(s=>counts[shStatus(s)]++);
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><div class="seg2">${[['today','Today'],['7','Last 7 days'],['30','Last 30 days'],['custom','Custom range']].map(([k,l])=>`<button class="${R.range===k?'on':''}" data-ana="${k}">${l}</button>`).join('')}</div>
+   ${R.range==='custom'?`<input type="date" class="fsel" data-anaf="from" value="${R.from}"> → <input type="date" class="fsel" data-anaf="to" value="${R.to}">`:''}<div class="spacer"></div><span class="muted" style="font-size:11px">${days.length} day${days.length===1?'':'s'} · today from current records, earlier days from generated demo history</span></div>
+   <div class="kg">${K.map(([l,v])=>`<div class="kc" style="cursor:default"><div class="kl">${l}</div><div class="kv">${v}</div></div>`).join('')}</div>
+   <div class="pnl"><h3>Daily inbound / outbound volume<span class="r legend"><span><i style="background:#2563eb"></i>Inbound</span><span><i style="background:#16a34a"></i>Outbound</span></span></h3>${lineSVG(days)}</div>
+   <div class="g2"><div class="pnl"><h3>Dock utilization<span class="r">average over range</span></h3>${barSVG(dockAvg,db.docks.map(d=>d.id))}</div><div class="pnl"><h3>Shipment statuses<span class="r">current records</span></h3>${donutSVG(counts)}</div></div>`}
+/* ---------- drawer ---------- */
+const TT={shipment:'SHIPMENT',vehicle:'VEHICLE',pallet:'PALLET',equipment:'EQUIPMENT',dock:'GATE / DOCK',task:'TASK',zone:'ZONE'};
+function recFor3D(id){const db=DB();if(!db||!id)return null;if(byId(db.vehicles,id))return {t:'vehicle',id};if(byId(db.equipment,id))return {t:'equipment',id};if(byId(db.pallets,id))return {t:'pallet',id};if(id===db.site)return {t:'overview'};return null}
+function getRec(t,id){const db=DB();return t==='shipment'?byId(db.shipments,id):t==='vehicle'?byId(db.vehicles,id):t==='pallet'?byId(db.pallets,id):t==='equipment'?byId(db.equipment,id):t==='dock'?(byId(db.docks,id)||(byId(db.gates,id)&&{...byId(db.gates,id),_g:1})):t==='task'?byId(db.tasks,id):t==='zone'?byId(db.zones,id):null}
+function openDrawer(t,id,locate=true){if(t==='zone'){openModule('inventory',{zone:id});return}if(t==='overview'){openModule('overview');return}
+  if(!OPS.open)openModule({shipment:'shipments',vehicle:'vehicles',pallet:'inventory',equipment:'equipment',dock:'docks',task:'tasks'}[t]);
+  OPS.drawer={t,id};const key={shipment:'shipments',vehicle:'vehicles',pallet:'inventory',equipment:'equipment',dock:'docks',task:'tasks'}[t];if(OPS.ts[key])OPS.ts[key].act=id;
+  renderDrawer();if(locate)locateRec(t,id,true);renderWS();applyOffset();setTimeout(applyOffset,230)}
+function closeDrawer(){OPS.drawer=null;$('drawer').classList.remove('open');document.body.classList.remove('dr');Object.values(OPS.ts).forEach(ts=>ts.act=null);applyOffset()}
+const link=(t,id,txt)=>id?`<span class="dlink" data-open="${t}:${hx(id)}">${hx(txt||id)}</span>`:'<span class="mut">—</span>';
+const sel=(name,opts,cur,ph)=>`<select class="fsel" data-dset="${name}"><option value="">${ph||'—'}</option>${opts.map(o=>{const [v,l]=Array.isArray(o)?o:[o,o];return `<option value="${hx(v)}" ${v===cur?'selected':''}>${hx(l)}</option>`}).join('')}</select>`;
+const frow=(k,v)=>`<div class="frow"><span class="muted">${k}</span><span style="text-align:right">${v}</span></div>`;
+function actLog(ids){return OPS.log.filter(l=>ids.some(i=>i&&l.msg.includes(i))).slice(0,6)}
+function logHTML(ids){const L=actLog(ids);return L.length?L.map(l=>`<div class="tl"><div class="ti d">${hx(l.msg)}<small>${fT(l.t)}</small></div></div>`).join(''):'<div class="muted" style="font-size:12px">No activity recorded in this session yet.</div>'}
+function renderDrawer(){const D=OPS.drawer;const el=$('drawer');if(!D||!DB()){el.classList.remove('open');return}const r=getRec(D.t,D.id);if(!r){closeDrawer();return}
+  const db=DB();let title=r.id,status='',body='',foot='';
+  if(D.t==='shipment'){const st=shStatus(r),v=r.vehicle&&byId(db.vehicles,r.vehicle),dk=shDock(r);status=st;
+    const steps=r.dir==='Inbound'?['Scheduled','Approaching','Arrived','Check-in','Unloading','Completed']:['Scheduled','Arrived','Check-in','Loading','Completed'];const map={Waiting:'Check-in',Delayed:'Approaching',Cancelled:'Scheduled'};const ci=steps.indexOf(map[st]||st);
+    const freeV=db.vehicles.filter(x=>!x.shipment||x.id===r.vehicle||vStatus(x)==='Scheduled').map(x=>[x.id,x.id+' · '+x.carrier]);
+    body=`<div class="dsec">OVERVIEW</div>${frow('Direction',r.dir)}${frow('Priority',sel('prio',['Low','Normal','High','Urgent'],r.prio))}${frow('Status',sel('shstatus',['Scheduled','Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Completed','Delayed','Cancelled'],st))}
+     ${frow(r.dir==='Inbound'?'Origin → site':'Destination',hx(r.dest||'—'))}${frow('ETA',fT(r.eta))}${frow('ETD',fT(r.etd))}${frow('Actual arrival',fT(r.actual))}
+     <div class="dsec">CARRIER & VEHICLE</div>${frow('Carrier',hx(r.carrier))}${frow('Vehicle',v?link('vehicle',v.id,v.id+' · '+v.reg):'<span class="mut">Unassigned</span>')}${frow('Assign vehicle',sel('shveh',freeV,r.vehicle,'Select vehicle'))}${v?frow('Driver',hx(v.driver)):''}
+     <div class="dsec">CARGO</div>${frow('Cargo type',r.cargo?hx(r.cargo):'<span style="color:#b45309">Missing</span>')}${frow('Quantity',r.qty+' pallets')}${frow('Pallets in records',shPallets(r.id).length)}
+     <div class="dsec">GATE & DOCK</div>${frow('Gate',link('dock',r.gate))}${frow('Dock',dk?link('dock',dk):'<span class="mut">Not assigned</span>')}${frow('Assign dock',sel('shdock',db.docks.map(d=>[d.id,d.id+' · '+dStatus(d)]),r.dock||dk,'Select dock'))}
+     <div class="dsec">OPERATIONAL TIMELINE</div><div class="tl">${steps.map((s,i)=>`<div class="ti ${i<ci?'d':i===ci?'c':''}">${s}${i===ci?` <span class="pill ${STATUS_TONE[st]||'neutral'}" style="margin-left:4px">${st}</span>`:''}<small>${i===0?fT(r.created):i===ci?'current':''}</small></div>`).join('')}</div>
+     <div class="dsec">RELATED PALLETS</div>${shPallets(r.id).slice(0,6).map(p=>`<div class="mini" data-open="pallet:${p.id}"><span><b>${p.id}</b> · ${hx(p.zone)}</span>${sb(pStatus(p))}</div>`).join('')||'<div class="muted" style="font-size:12px">No pallets linked.</div>'}
+     <div class="dsec">RELATED TASKS</div>${shTasks(r.id).map(t=>`<div class="mini" data-open="task:${t.id}"><span><b>${t.id}</b> · ${hx(t.type)}</span>${sb(t.status)}</div>`).join('')||'<div class="muted" style="font-size:12px">No tasks.</div>'}
+     <div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id,r.vehicle])}`;
+    foot=`<button class="btn" data-a="editship">${ic('edit','#0f172a',14)}Edit</button><button class="btn" data-a="locate">${ic('target','#0f172a',14)}Locate in 3D</button>`}
+  if(D.t==='vehicle'){const st=vStatus(r);status=st;const sh=r.shipment&&byId(db.shipments,r.shipment);
+    body=`${r.in3d?'':'<div class="dnote">Data-only record: this vehicle is not on site, so it is not drawn in the 3D scene.</div>'}<div class="dsec">VEHICLE</div>${frow('Registration',r.reg)}${frow('Type',r.type)}${frow('Carrier',r.carrier)}${frow('Driver',r.driver)}
+     <div class="dsec">LOCATION</div>${frow('Current location',hx(vLoc(r)))}${frow('Dock',vDock(r)?link('dock',vDock(r)):'—')}${frow('Arrival',fT(r.arr))}${frow('Departure',fT(r.dep))}${r.ref&&r.ref.state==='waiting'?frow('Waiting at gate',r.ref.waitMin+' min'):''}
+     <div class="dsec">ASSIGNMENT</div>${frow('Shipment',sh?link('shipment',sh.id):'—')}${frow('Assign shipment',sel('vship',db.shipments.filter(s=>!s.vehicle||s.id===r.shipment).map(s=>[s.id,s.id+' · '+s.dir]),r.shipment,'Select shipment'))}
+     ${frow('Assign dock',sel('vdock',db.docks.map(d=>[d.id,d.id+' · '+dStatus(d)]),vDock(r),'Select dock'))}
+     <div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id])}`;
+    foot=`<button class="btn" data-a="locate" ${r.in3d?'':'disabled'}>${ic('target','#0f172a',14)}Locate in 3D</button>`}
+  if(D.t==='pallet'){const st=pStatus(r);status=st;
+    body=`${r.in3d?'':'<div class="dnote">Data-only record: shown in tables, not drawn as a separate 3D object.</div>'}<div class="dsec">CARGO</div>${frow('Description',hx(r.desc))}${frow('Cargo type',hx(r.type))}${frow('Quantity',r.qty+' units')}${frow('Weight',r.weight+' kg')}${frow('Shipment',link('shipment',r.shipment))}
+     <div class="dsec">LOCATION</div>${frow('Zone',link('zone',r.zone))}${frow('Position',r.pos)}${frow('Move to zone',sel('pzone',db.zones.map(z=>[z.id,`${z.id} · ${zoneUse(z.id)}/${z.cap}`]),r.zone,'Select zone'))}${frow('Arrival',fT(r.arr))}${frow('Storage duration',r.arr?fDur((now0()-r.arr)/MIN):'—')}
+     ${frow('Status',sel('pstatus',['Expected','Received','In Storage','Reserved','In Transit','Dispatched','Damaged'],st))}<div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id])}`;
+    foot=`<button class="btn" data-a="locate" ${r.in3d?'':'disabled'}>${ic('target','#0f172a',14)}Locate in 3D</button>`}
+  if(D.t==='equipment'){const st=eStatus(r),b=eBatt(r);status=st;const util=r.in3d?(st==='In Use'?'In use now':'Idle now'):'—';
+    body=`${r.in3d?'':'<div class="dnote">Data-only record: this equipment is not drawn in the 3D scene.</div>'}<div class="dsec">EQUIPMENT</div>${frow('Type',r.type)}${frow('Model',hx(r.model))}${frow('Location',hx(eLoc(r)))}
+     ${b!=null?`<div class="row-status"><div class="bar ${b<20?'red':b<40?'amber':''}"><i style="width:${b}%"></i></div><span>${r.fuel?'Fuel':'Battery'} ${b}%</span></div>`:''}${frow('Working hours',r.hours.toLocaleString('en-US')+' h')}${frow('Utilization',util+(r.in3d&&r.ref.moves!=null?' · '+r.ref.moves+' moves today':''))}
+     ${r.type!=='Charging station'?frow('Operator',sel('eop',OPERATORS,r.operator,'Unassigned')):''}${frow('Status override',sel('estatus',['Maintenance','Out of Service'],r.ov,'None (live)'))}
+     <div class="dsec">MAINTENANCE</div>${frow('Next service',new Date(r.maint).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}))}${r.mlog.map(m=>`<div class="tl"><div class="ti d">${hx(m.msg)}<small>${new Date(m.t).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</small></div></div>`).join('')||'<div class="muted" style="font-size:12px">No maintenance records.</div>'}
+     <div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id])}`;
+    foot=`<button class="btn" data-a="locate" ${r.in3d?'':'disabled'}>${ic('target','#0f172a',14)}Locate in 3D</button>${r.in3d&&r.type==='Forklift'&&r.ref.op!=='Charging'&&r.ref.op!=='To charger'?`<button class="btn" data-a="eqcharge">${ic('bolt','#0f172a',14)}Send to charger</button>`:''}`}
+  if(D.t==='dock'){if(r._g){status=gStatus(r);const v=gVeh(r);body=`<div class="dsec">GATE</div>${frow('Type',r.type)}${frow('Vehicle at gate',v!=='—'?link('vehicle',v):'—')}${frow('Waiting time',fDur(dDur(r)))}${frow('Status override',sel('gstatus',['Blocked','Maintenance'],r.ov,'None (live)'))}${r.in3d?'':'<div class="dnote">Data-only record: G2 is not drawn in the 3D scene.</div>'}<div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id])}`}
+    else{const st=dStatus(r);status=st;const vid=dVehicle(r),shid=dShip(r);
+    body=`<div class="dsec">OCCUPANCY</div>${frow('Vehicle',vid?link('vehicle',vid):'—')}${frow('Shipment',shid?link('shipment',shid):'—')}${frow('Operation',dOp(r))}${frow('Scheduled',fT(dSched(r)))}${frow('Actual arrival',fT(dActual(r)))}${frow('Current duration',fDur(dDur(r)))}
+     <div class="dsec">ASSIGN & SCHEDULE</div>${dTruck(r)?'<div class="muted" style="font-size:12px">Occupied by a vehicle on site. Release it before re-assigning.</div>':frow('Assign vehicle',sel('dveh',db.vehicles.filter(v=>!vDock(v)||vDock(v)===r.id).map(v=>[v.id,v.id+' · '+vStatus(v)]),r.vOv||'','Select vehicle'))+frow('Assign shipment',sel('dsh',db.shipments.filter(s=>!['Completed','Cancelled'].includes(shStatus(s))).map(s=>[s.id,s.id+' · '+s.dir]),r.shOv||'','Select shipment'))}
+     ${frow('Schedule slot',`<input type="datetime-local" class="fsel" data-dset="dsched" value="${r.sched?new Date(r.sched-new Date().getTimezoneOffset()*MIN).toISOString().slice(0,16):''}">`)}${frow('Status override',sel('dstatus',['Blocked','Maintenance'],r.ov,'None (live)'))}
+     <div class="dsec">OPERATIONAL HISTORY</div>${r.log.concat(actLog([r.id])).sort((a,b)=>b.t-a.t).slice(0,6).map(l=>`<div class="tl"><div class="ti d">${hx(l.msg)}<small>${fT(l.t)}</small></div></div>`).join('')}`}
+    foot=`<button class="btn" data-a="locate" ${r.in3d?'':'disabled'}>${ic('target','#0f172a',14)}Locate in 3D</button>`}
+  if(D.t==='task'){status=r.status;title=r.id+' · '+r.type;
+    body=`<div class="dsec">TASK</div>${frow('Description',hx(r.desc))}${frow('Priority',sel('tprio',['Low','Normal','High','Urgent'],r.prio))}${frow('Shipment',link('shipment',r.shipment))}${frow('Vehicle',link('vehicle',r.vehicle))}${frow('Operator',sel('top',OPERATORS,r.operator,'Unassigned'))}${frow('Created',fT(r.created))}${frow('Due',fT(r.due))}${r.auto?'<div class="dnote" style="background:#eff6ff;border-color:#bfdbfe;color:#1e40af">Completes automatically when the yard action is done in 3D or in the record.</div>':''}
+     <div class="dsec">ACTIVITY HISTORY</div>${logHTML([r.id])}`;
+    foot=['In Progress','Completed','Blocked','Cancelled'].map(s=>`<button class="btn ${s==='Completed'?'pri':''}" data-tkset="${s}" ${r.status===s?'disabled':''}>${s==='In Progress'?'Start':s==='Completed'?'Complete':s==='Blocked'?'Block':'Cancel'}</button>`).join('')}
+  el.innerHTML=`<div class="dwh"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="eyebrow">${TT[D.t]}${r.type&&D.t!=='task'&&D.t!=='pallet'?' · '+hx(r.type).toUpperCase():''}</div><div class="dtitle" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${hx(title)}</div><div style="margin-top:6px;display:flex;gap:6px;align-items:center">${sb(status)}${r.in3d!=null?g3(r):''}</div></div><button class="act" data-a="closedrawer" aria-label="Close details">${ic('x','#0f172a',14)}</button></div></div><div class="dwb">${body}</div><div class="dwf">${foot}</div>`;
+  el.classList.add('open');document.body.classList.add('dr')}
+/* ---------- 3D sync ---------- */
+function clearExtra(){OPS.extra.forEach(m=>m.parent&&m.parent.remove(m));OPS.extra=[]}
+function dockMarker(id){const d=byId(DB().docks,id);if(!d)return;const m=makeMarker(6.2,15.5,'#f59e0b');m.position.set(dockX(d.idx),0,7.6);root.add(m);OPS.extra.push(m)}
+function locateRec(t,id,quiet){const db=DB();if(!db)return;clearExtra();const r=getRec(t,id);if(!r)return;
+  const sel3=(eid,focus=true)=>{OPS.syncing=true;select(eid,focus,true);OPS.syncing=false};
+  if(t==='vehicle'||t==='equipment'||t==='pallet'){if(r.in3d&&ents[id]){sel3(id)}else if(!quiet)toast(id+' is a data-only record — not in the 3D scene','warn','#fcd34d');else sel3(null,false);return}
+  if(t==='dock'){if(r._g){if(r.id==='G1'&&booth){sel3(null,false);const p=booth.position;tween={t:0,dur:.7,fromT:controls.target.clone(),toT:new THREE.Vector3(p.x,0,p.z),off:camera.position.clone().sub(controls.target),fromZ:camera.zoom,toZ:1.6};const m=makeMarker(10,8,'#f59e0b');m.position.set(p.x-2,0,p.z+1);root.add(m);OPS.extra.push(m)}else if(!quiet)toast(id+' is not drawn in the 3D scene','warn','#fcd34d');return}
+    const tr=dTruck(r);sel3(tr?tr.id:null,!!tr);dockMarker(id);if(!tr){const x=dockX(r.idx);tween={t:0,dur:.7,fromT:controls.target.clone(),toT:new THREE.Vector3(x,0,6),off:camera.position.clone().sub(controls.target),fromZ:camera.zoom,toZ:1.5}}return}
+  if(t==='shipment'){const v=r.vehicle&&byId(db.vehicles,r.vehicle);if(v&&v.in3d&&ents[v.id])sel3(v.id);else sel3(null,false);const dk=shDock(r);if(dk)dockMarker(dk);
+    shPallets(r.id).forEach(p=>{if(p.in3d&&ents[p.id]){const m=attachMarker(p.id);if(m)OPS.extra.push(m)}});
+    if(!(v&&v.in3d)&&!quiet)toast(r.id+' has no vehicle on site · showing dock and pallets where available','warn','#fcd34d');return}
+  if(t==='task'){if(r.vehicle&&ents[r.vehicle])sel3(r.vehicle)}}
+function on3DSelect(id){if(OPS.syncing||!DB()||!OPS.open)return;const rec=recFor3D(id);if(!rec)return;if(rec.t==='overview'){return}clearExtra();openDrawer(rec.t,rec.id,false)}
+/* ---------- actions & events ---------- */
+function logA(msg){OPS.log.unshift({t:now0(),msg})}
+function refreshOps(){if(!DB()){if(OPS.open){OPS.open=null;document.body.classList.remove('ws');closeDrawer()}document.body.classList.remove('ops-on');return}
+  document.body.classList.add('ops-on');opsTick();renderRail();if(OPS.open&&!OPS.loading){renderWS();if(OPS.drawer)renderDrawer()}}
+function setShipStatus(s,v){s.ov=v||null;logA(`Status changed · ${s.id} → ${v}`)}
+function dset(name,val){const D=OPS.drawer,db=DB();const r=getRec(D.t,D.id);if(!r)return;
+  if(name==='prio'){r.prio=val;logA(`Priority set · ${r.id} → ${val}`)}
+  if(name==='shstatus'){setShipStatus(r,val)}
+  if(name==='shveh'){const old=r.vehicle&&byId(db.vehicles,r.vehicle);if(old&&old.shipment===r.id)old.shipment=null;r.vehicle=val||null;const nv=val&&byId(db.vehicles,val);if(nv){const prev=nv.shipment&&byId(db.shipments,nv.shipment);if(prev&&prev!==r)prev.vehicle=null;nv.shipment=r.id}logA(`Vehicle assigned · ${r.id} → ${val||'none'}`)}
+  if(name==='shdock'){r.dock=val||null;logA(`Dock assigned · ${r.id} → ${val||'none'}`);const v=r.vehicle&&byId(db.vehicles,r.vehicle);if(v&&v.ref&&v.ref.state==='waiting'&&val){const d=byId(db.docks,val);if(d&&dStatus(d)==='Available'){assignDock(v.id,d.idx);return}}}
+  if(name==='vship'){const old=r.shipment&&byId(db.shipments,r.shipment);if(old)old.vehicle=null;r.shipment=val||null;const s=val&&byId(db.shipments,val);if(s)s.vehicle=r.id;logA(`Shipment assigned · ${r.id} → ${val||'none'}`)}
+  if(name==='vdock'){const d=val&&byId(db.docks,val);if(r.ref&&r.ref.state==='waiting'&&d){if(dStatus(d)!=='Available'){toast(val+' is not available','warn','#fcd34d');refreshOps();return}assignDock(r.id,d.idx);return}
+    if(r.ref&&r.ref.dock!=null){toast(r.id+' is already at '+vDock(r)+' in the 3D yard','warn','#fcd34d');refreshOps();return}r.dockOv=val||null;if(d)d.vOv=r.id;logA(`Dock assigned · ${r.id} → ${val||'none'}`)}
+  if(name==='pzone'){const z=byId(db.zones,val);if(z&&zoneUse(z.id)>=z.cap&&r.zone!==z.id)toast(`${z.id} is full — moved anyway (over capacity)`,'warn','#fcd34d');r.zone=val||r.zone;r.pos=(val||'').split(' ').map(w=>w[0]).join('').toUpperCase()+'-'+pad(zoneUse(val));logA(`Pallet moved · ${r.id} → ${val}`)}
+  if(name==='pstatus'){r.ov=val||null;logA(`Status changed · ${r.id} → ${val}`)}
+  if(name==='eop'){r.operator=val||null;logA(`Operator assigned · ${r.id} → ${val||'none'}`)}
+  if(name==='estatus'){r.ov=val||null;logA(`Status changed · ${r.id} → ${val||'live'}`)}
+  if(name==='gstatus'){const g=byId(db.gates,r.id);g.ov=val||null;logA(`Gate status · ${r.id} → ${val||'live'}`)}
+  if(name==='dveh'){const d=byId(db.docks,r.id);const old=d.vOv&&byId(db.vehicles,d.vOv);if(old)old.dockOv=null;d.vOv=val||null;const v=val&&byId(db.vehicles,val);if(v){if(v.ref&&v.ref.state==='waiting'){d.vOv=null;assignDock(v.id,d.idx);return}v.dockOv=d.id}logA(`Vehicle assigned · ${d.id} → ${val||'none'}`)}
+  if(name==='dsh'){const d=byId(db.docks,r.id);d.shOv=val||null;const s=val&&byId(db.shipments,val);if(s)s.dock=d.id;logA(`Shipment assigned · ${d.id} → ${val||'none'}`)}
+  if(name==='dsched'){const d=byId(db.docks,r.id);d.sched=val?new Date(val).getTime():null;logA(`Dock scheduled · ${d.id} → ${val?fT(d.sched):'cleared'}`)}
+  if(name==='dstatus'){const d=byId(db.docks,r.id);d.ov=val||null;logA(`Dock status · ${d.id} → ${val||'live'}`)}
+  if(name==='tprio'){r.prio=val;logA(`Priority set · ${r.id} → ${val}`)}
+  if(name==='top'){r.operator=val||null;logA(`Task assigned · ${r.id} → ${val||'none'}`)}
+  toast('Saved','check','#4ade80');renderAll()}
+function exportCSV(key,selOnly){const cfg=key==='ov-sh'?CFG('shipments'):CFG(key);const ts=tsOf(key);let rows=applyTable(cfg.rows(),cfg,ts);if(selOnly)rows=cfg.rows().filter(r=>ts.sel.has(r.id));
+  const cols=cfg.cols.filter(c=>!ts.hidden.has(c.k));const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  const val=(c,r)=>{const v=c.v(r);return ['eta','arr','dep','created','due','sched','act','maint'].includes(c.k)&&typeof v==='number'?new Date(v).toISOString():v};
+  const csv=[cols.map(c=>c.label).join(',')].concat(rows.map(r=>cols.map(c=>q(val(c,r))).join(','))).join('\n');
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=`yard-twin-${key}-${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();a.remove()}catch(e){}
+  try{navigator.clipboard.writeText(csv).catch(()=>{})}catch(e){}toast(`CSV ready · ${rows.length} rows (downloaded; also copied to clipboard)`,'down','#93c5fd')}
+function showPop(html,anchor){const p=$('pop');p.innerHTML=html;p.classList.add('open');const r=anchor.getBoundingClientRect();const w=p.offsetWidth,h=p.offsetHeight;p.style.left=Math.max(8,Math.min(innerWidth-w-8,r.right-w))+'px';p.style.top=(r.bottom+h+8>innerHeight?r.top-h-4:r.bottom+4)+'px'}
+function hidePop(){$('pop').classList.remove('open')}
+function shipForm(s){const db=DB(),n=!s;s=s||{dir:'Inbound',carrier:CARRIERS[0],vehicle:'',cargo:CARGO[0],qty:6,eta:now0()+120*MIN,gate:'G1',dock:'',prio:'Normal'};
+  const dt=v=>v?new Date(v-new Date().getTimezoneOffset()*MIN).toISOString().slice(0,16):'';
+  const o=(arr,cur)=>arr.map(x=>{const [v,l]=Array.isArray(x)?x:[x,x];return `<option value="${hx(v)}" ${v===cur?'selected':''}>${hx(l)}</option>`}).join('');
+  $('modal').firstChild.innerHTML=`<div style="display:flex;align-items:center"><b style="font-size:16px">${n?'New shipment':'Edit '+hx(s.id)}</b><div class="spacer"></div><button class="act" data-a="closemodal" aria-label="Close">${ic('x','#0f172a',14)}</button></div>
+   <form id="shf"><div class="fg"><label>Direction<select name="dir">${o(['Inbound','Outbound'],s.dir)}</select></label><label>Carrier<select name="carrier">${o(CARRIERS,s.carrier)}</select></label>
+   <label>Vehicle<select name="vehicle"><option value="">Unassigned</option>${o(db.vehicles.filter(v=>!v.shipment||v.id===s.vehicle).map(v=>[v.id,v.id+' · '+v.carrier]),s.vehicle)}</select></label><label>Cargo type<select name="cargo"><option value="">— missing —</option>${o(CARGO,s.cargo)}</select></label>
+   <label>Quantity (pallets)<input name="qty" type="number" min="1" max="60" required value="${s.qty}"></label><label>${'ETA / ETD'}<input name="eta" type="datetime-local" required value="${dt(s.eta)}"></label>
+   <label>Gate<select name="gate">${o(['G1','G2'],s.gate)}</select></label><label>Dock<select name="dock"><option value="">Not assigned</option>${o(db.docks.map(d=>[d.id,d.id+' · '+dStatus(d)]),s.dock)}</select></label>
+   <label>Priority<select name="prio">${o(['Low','Normal','High','Urgent'],s.prio)}</select></label>${n?'':`<label>Status<select name="status">${o(['Scheduled','Approaching','Arrived','Check-in','Waiting','Loading','Unloading','Completed','Delayed','Cancelled'],shStatus(s))}</select></label>`}</div>
+   <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button type="button" class="btn" data-a="closemodal">Cancel</button><button class="btn pri" type="submit">${n?'Create shipment':'Save changes'}</button></div></form>`;
+  $('modal').classList.add('open');$('shf').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));const eta=new Date(f.eta).getTime();if(isNaN(eta)){toast('Enter a valid date','warn','#fcd34d');return}
+    let rec=s;if(n){rec={id:'#SHP-'+(db.seq.shp++),actual:null,created:now0(),ov:'Scheduled',unit:'pallets',dest:f.dir==='Inbound'?db.site:'—'};db.shipments.unshift(rec)}
+    const oldV=rec.vehicle;Object.assign(rec,{dir:f.dir,carrier:f.carrier,cargo:f.cargo||null,qty:+f.qty,eta,etd:eta+90*MIN,gate:f.gate,dock:f.dock||null,prio:f.prio});
+    if(f.vehicle!==(oldV||'')){if(oldV){const ov=byId(db.vehicles,oldV);if(ov)ov.shipment=null}rec.vehicle=f.vehicle||null;if(f.vehicle)byId(db.vehicles,f.vehicle).shipment=rec.id}
+    if(!n&&f.status&&f.status!==shStatus(rec))rec.ov=f.status;
+    logA(`${n?'Shipment created':'Shipment edited'} · ${rec.id}`);$('modal').classList.remove('open');toast(n?rec.id+' created':rec.id+' saved');openDrawer('shipment',rec.id,false);renderAll()}}
+function taskForm(){const db=DB();$('modal').firstChild.innerHTML=`<div style="display:flex;align-items:center"><b style="font-size:16px">New task</b><div class="spacer"></div><button class="act" data-a="closemodal" aria-label="Close">${ic('x','#0f172a',14)}</button></div>
+  <form id="tkf"><div class="fg"><label>Type<select name="type">${['Unload','Load','Move pallets','Inspect damage','Charge equipment','Yard check','Other'].map(x=>`<option>${x}</option>`).join('')}</select></label><label>Priority<select name="prio">${['Low','Normal','High','Urgent'].map(x=>`<option ${x==='Normal'?'selected':''}>${x}</option>`).join('')}</select></label>
+  <label class="full">Description<input name="desc" required placeholder="What needs to be done"></label><label>Shipment<select name="shipment"><option value="">—</option>${db.shipments.map(s=>`<option>${s.id}</option>`).join('')}</select></label><label>Vehicle<select name="vehicle"><option value="">—</option>${db.vehicles.map(v=>`<option>${v.id}</option>`).join('')}</select></label>
+  <label>Operator<select name="operator"><option value="">Unassigned</option>${OPERATORS.map(o=>`<option>${o}</option>`).join('')}</select></label><label>Due in (min)<input name="due" type="number" min="5" value="60"></label></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button type="button" class="btn" data-a="closemodal">Cancel</button><button class="btn pri" type="submit">Create task</button></div></form>`;
+  $('modal').classList.add('open');$('tkf').onsubmit=e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));const id='T-'+(1100+db.tasks.length+50);
+    db.tasks.unshift({id,type:f.type,desc:f.desc,shipment:f.shipment||null,vehicle:f.vehicle||null,operator:f.operator||null,prio:f.prio,created:now0(),due:now0()+(+f.due||60)*MIN,status:'Open',auto:null});logA(`Task created · ${id}`);$('modal').classList.remove('open');toast(id+' created');openDrawer('task',id,false);renderAll()}}
+function menuAct(t,id,a){const db=DB(),r=getRec(t,id);if(!r)return;hidePop();
+  if(a==='view')return openDrawer(t,id);if(a==='locate'){openDrawer(t,id);return}
+  if(a==='edit')return shipForm(r);if(a.startsWith('st:')){setShipStatus(r,a.slice(3));toast(r.id+' → '+a.slice(3));renderAll();return}
+  if(a==='assigndock'||a==='move'){openDrawer(t,id);return}
+  if(a.startsWith('eq:')){r.ov=a.slice(3)||null;logA(`Status changed · ${r.id} → ${r.ov||'live'}`);toast(r.id+' · '+(r.ov||'returned to service'));renderAll();return}
+  if(a.startsWith('blk:')){const tgt=r._g?byId(db.gates,r.id):byId(db.docks,r.id);if(!r._g&&dTruck(r)&&a!=='blk:'){toast(r.id+' is occupied — cannot block now','warn','#fcd34d');return}tgt.ov=a.slice(4)||null;logA(`Status changed · ${r.id} → ${tgt.ov||'live'}`);toast(r.id+' · '+(tgt.ov||'cleared'));renderAll();return}
+  if(a.startsWith('tk:')){r.status=a.slice(3);logA(`Task ${r.status.toLowerCase()} · ${r.id}`);toast(r.id+' · '+r.status);renderAll();return}}
+document.addEventListener('click',ev=>{const tg=ev.target;
+  if(!tg.closest('#pop')&&!tg.closest('[data-tmenu]')&&!tg.closest('[data-tcols]'))hidePop();
+  const b=tg.closest('[data-mod],[data-kpi],[data-open],[data-row],[data-tsort],[data-tpage],[data-tmenu],[data-tcols],[data-texp],[data-tclr],[data-tclrf],[data-ana],[data-tkset],[data-bulkdo],[data-popact],[data-a]');if(!b)return;
+  if(tg.matches('input[type=checkbox],select,input')&&!b.matches('[data-a]'))return;
+  const d=b.dataset;
+  if(d.mod!=null&&!d.row){ev.stopPropagation();if(d.mod===''){openModule(null);return}openModule(d.mod);return}
+  if(d.kpi){openModule(d.kpi,JSON.parse(d.kf||'{}'));return}
+  if(d.open){const [t,...rest]=d.open.split(':');openDrawer(t,rest.join(':'));return}
+  if(d.row){const [t,...rest]=d.row.split(':');openDrawer(t,rest.join(':'));return}
+  if(d.tsort){const [k,c]=d.tsort.split(':');const ts=tsOf(k);if(ts.sort===c)ts.dir*=-1;else{ts.sort=c;ts.dir=1}renderWS();return}
+  if(d.tpage){const [k,s]=d.tpage.split(':');tsOf(k).page+=+s;renderWS();return}
+  if(d.tclr){tsOf(d.tclr).sel.clear();renderWS();return}
+  if(d.tclrf){const ts=tsOf(d.tclrf);ts.f={};ts.q='';renderWS();return}
+  if(d.texp){exportCSV(d.texp,!!d.selOnly);return}
+  if(d.tcols){const cfg=CFG(d.tcols),ts=tsOf(d.tcols);showPop(cfg.cols.map(c=>`<label><input type="checkbox" data-tcol="${d.tcols}:${c.k}" ${ts.hidden.has(c.k)?'':'checked'} ${c.k==='id'?'disabled':''}> ${c.label}</label>`).join(''),b);return}
+  if(d.tmenu){const [t,...rest]=d.tmenu.split(':');const id=rest.join(':');const key={shipment:'shipments',vehicle:'vehicles',pallet:'inventory',equipment:'equipment',dock:'docks',task:'tasks'}[t];const r=getRec(t,id);
+    showPop(CFG(key).menu(r).map(([a,l,dng])=>`<button data-popact="${t}|${hx(id)}|${a}" class="${dng?'dng':''}">${l}</button>`).join(''),b);return}
+  if(d.popact){const [t,id,a]=d.popact.split('|');menuAct(t,id,a);return}
+  if(d.ana){OPS.ana.range=d.ana;renderWS();return}
+  if(d.tkset){const r=getRec('task',OPS.drawer.id);r.status=d.tkset;logA(`Task ${d.tkset.toLowerCase()} · ${r.id}`);toast(r.id+' · '+d.tkset);renderAll();return}
+  if(d.bulkdo){const [k]=d.bulkdo.split(':');const ts=tsOf(k);DB().tasks.filter(t=>ts.sel.has(t.id)).forEach(t=>{t.status='Completed';logA(`Task completed · ${t.id}`)});toast(ts.sel.size+' tasks completed');ts.sel.clear();renderAll();return}
+  const a=d.a;if(!a)return;
+  if(a==='fullyard'){closeDrawer();clearExtra();OPS.syncing=true;select(null,false,true);OPS.syncing=false;tween={t:0,dur:.7,fromT:controls.target.clone(),toT:homeT(),off:CAMDIR.clone().multiplyScalar(120),fromZ:camera.zoom,toZ:homeZ()*.82};renderWS();return}
+  if(a==='closedrawer'){closeDrawer();clearExtra();renderWS();return}
+  if(a==='locate'&&OPS.drawer){locateRec(OPS.drawer.t,OPS.drawer.id);return}
+  if(a==='newship'){shipForm(null);return}if(a==='editship'){shipForm(getRec('shipment',OPS.drawer.id));return}if(a==='newtask'){taskForm();return}
+  if(a==='closemodal'){$('modal').classList.remove('open');return}
+  if(a==='eqcharge'){const e=getRec('equipment',OPS.drawer.id);if(freeCharger()<0){toast('No free charger','warn','#fcd34d');return}sendToCharger(e.id);return}
+  if(a==='openrec'){const rec=recFor3D(selected);if(rec)openDrawer(rec.t,rec.id,false);else openModule('overview');return}},true);
+document.addEventListener('input',ev=>{const t=ev.target;if(t.dataset.tq){const ts=tsOf(t.dataset.tq);ts.q=t.value;ts.page=0;renderWS()}});
+document.addEventListener('change',ev=>{const t=ev.target,d=t.dataset;
+  if(d.tf){const [k,f]=d.tf.split(':');const ts=tsOf(k);ts.f[f]=t.value;ts.page=0;renderWS()}
+  if(d.tsize){const ts=tsOf(d.tsize);ts.size=+t.value;ts.page=0;renderWS()}
+  if(d.tsel){const [k,...rest]=d.tsel.split(':');const id=rest.join(':');const ts=tsOf(k);t.checked?ts.sel.add(id):ts.sel.delete(id);renderWS()}
+  if(d.tall){const k=d.tall,cfg=CFG(k),ts=tsOf(k);const all=applyTable(cfg.rows(),cfg,ts).slice(ts.page*ts.size,ts.page*ts.size+ts.size);all.forEach(r=>t.checked?ts.sel.add(r.id):ts.sel.delete(r.id));renderWS()}
+  if(d.tcol){const [k,c]=d.tcol.split(':');const ts=tsOf(k);t.checked?ts.hidden.delete(c):ts.hidden.add(c);renderWS()}
+  if(d.bulk){const [k,f]=d.bulk.split(':');const ts=tsOf(k),db=DB();const v=t.value;if(!v)return;
+    if(f==='status')db.shipments.filter(s=>ts.sel.has(s.id)).forEach(s=>setShipStatus(s,v));
+    if(f==='zone')db.pallets.filter(p=>ts.sel.has(p.id)).forEach(p=>{p.zone=v;logA(`Pallet moved · ${p.id} → ${v}`)});
+    if(f==='op')db.tasks.filter(x=>ts.sel.has(x.id)).forEach(x=>{x.operator=v;logA(`Task assigned · ${x.id} → ${v}`)});
+    toast(`${ts.sel.size} records updated`);ts.sel.clear();renderAll()}
+  if(d.anaf){OPS.ana[d.anaf]=t.value;renderWS()}
+  if(d.dset){dset(d.dset,t.value)}});
+addEventListener('keydown',e=>{if(e.key==='Escape'){if($('modal').classList.contains('open'))$('modal').classList.remove('open');else if($('pop').classList.contains('open'))hidePop();else if(OPS.drawer){closeDrawer();renderWS()}}});
+
+setInterval(()=>{if(!DB())return;const ch=opsTick();renderRail();const ae=document.activeElement;const busy=ae&&(ae.closest('#ws,#drawer,#modal')&&ae.matches('input,select'));if(OPS.open&&!OPS.loading&&!busy&&!$('pop').classList.contains('open')&&!$('modal').classList.contains('open')){if(!$('ws').matches(':hover'))renderWS();if(OPS.drawer&&!$('drawer').matches(':hover'))renderDrawer()}},4000);
+
 /* ================= I18N (EN / УКР) ================= */
 const UK={
 'pcs':'шт.','Next leg':'Наступний етап','NEXT LEG':'НАСТУПНИЙ ЕТАП','Cut-off buffer':'Запас до cut-off','Track on journey':'Відстежити в подорожі','Downstream':'Далі по маршруту','locker L-03 almost full':'поштомат L-03 майже повний','Put-away':'Розміщення','Route →':'Маршрут →','On time':'Вчасно','days':'дн.','2 d 4 h':'2 д 4 год','1 d':'1 д','22 h':'22 год','−2 h':'−2 год','2 h 10 min':'2 год 10 хв','2 h 14 min':'2 год 14 хв','Parcel journey':'Подорож посилки','JOURNEY':'ПОДОРОЖ','Journey':'Подорож','stages':'етапів','scroll to travel':'прокручуй, щоб їхати','open →':'відкрити →','Whole road':'Вся дорога','Flights':'Рейси','ULDs':'ULD','Equipment':'Техніка','FLIGHT':'РЕЙС','Cut-off':'Cut-off','ULDs ready':'ULD готові','on board':'на борту','On-time departures':'Вчасні вильоти',
@@ -1154,6 +1588,7 @@ const UK={
 'Label Rolls':'Рулони етикеток','Pallet Wrap':'Палетна плівка','Foam Inserts':'Пінні вставки','pallets':'палет','pallet':'палета','min':'хв','at':'у','to':'до',
 };
 const esc=x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+Object.assign(UK,{'3D Yard':'3D двір','Overview':'Огляд','Shipments':'Відправлення','Vehicles':'Транспорт','Inventory':'Склад','Equipment':'Техніка','Gates & Docks':'Ворота і доки','Tasks & Alerts':'Задачі й алерти','Analytics':'Аналітика','Demo data · not live':'Демо-дані · не наживо','Full yard':'Весь двір','Columns':'Колонки','Export CSV':'Експорт CSV','Export selected':'Експорт вибраних','New shipment':'Нове відправлення','New task':'Нова задача','Clear':'Скинути','Search ID, vehicle or carrier':'Пошук ID, авто чи перевізника','Status: all':'Статус: усі','Direction: all':'Напрям: усі','Priority: all':'Пріоритет: усі','Date: all':'Дата: усі','Type: all':'Тип: усі','Zone: all':'Зона: усі','Carrier: all':'Перевізник: усі','Status: all active':'Статус: усі активні','Status: on site':'Статус: на майданчику','Status: on yard':'Статус: на дворі','Status: not done':'Статус: не виконані','Shipment ID':'ID відправлення','Direction':'Напрям','Carrier':'Перевізник','Vehicle':'Транспорт','Cargo type':'Тип вантажу','Qty':'К-сть','ETA / ETD':'ETA / ETD','Gate':'Ворота','Dock':'Док','Priority':'Пріоритет','Status':'Статус','Vehicle ID':'ID авто','Registration':'Номер','Driver':'Водій','Location':'Розташування','Shipment':'Відправлення','Arrival':'Прибуття','Departure':'Відʼїзд','Pallet ID':'ID палети','Cargo description':'Опис вантажу','Weight':'Вага','Zone':'Зона','Position':'Позиція','Storage':'Зберігання','Equipment ID':'ID техніки','Model':'Модель','Operator':'Оператор','Battery / fuel':'Батарея / паливо','Hours':'Мотогодини','Next service':'Наступне ТО','Gate / Dock':'Ворота / док','Scheduled':'Заплановано','Actual arrival':'Фактичне прибуття','Operation':'Операція','Duration':'Тривалість','Task ID':'ID задачі','Description':'Опис','Created':'Створено','Due':'Термін','Inbound':'Вхідне','Outbound':'Вихідне','Approaching':'Наближається','Check-in':'Реєстрація','Waiting':'Очікує','Completed':'Завершено','Delayed':'Затримка','Cancelled':'Скасовано','On Yard':'На дворі','At Gate':'Біля воріт','At Dock':'У доку','Expected':'Очікується','Received':'Прийнято','In Storage':'На зберіганні','Reserved':'Зарезервовано','In Transit':'У дорозі','Dispatched':'Відвантажено','Damaged':'Пошкоджено','In Use':'Працює','Maintenance':'Обслуговування','Out of Service':'Не працює','Occupied':'Зайнятий','Blocked':'Заблоковано','Open':'Відкрита','In Progress':'В роботі','Low':'Низький','Normal':'Звичайний','High':'Високий','Urgent':'Терміново','Unassigned':'Не призначено','Missing':'Відсутнє','Total vehicles':'Усього авто','Active shipments':'Активні відправлення','Pallets on yard':'Палет на дворі','Available docks':'Вільні доки','Active equipment':'Активна техніка','Delayed shipments':'Затримані відправлення','Recent shipments':'Останні відправлення','Recent activity':'Остання активність','Active alerts':'Активні алерти','Yard occupancy':'Заповненість двору','Quick access':'Швидкий доступ','View all →':'Усі →','this session':'ця сесія','No active alerts':'Немає активних алертів','Today':'Сьогодні','Last 7 days':'Останні 7 днів','Last 30 days':'Останні 30 днів','Custom range':'Свій період','Avg vehicle turnaround':'Сер. час обороту авто','Avg loading / unloading':'Сер. завантаження / розвантаження','On-time arrival rate':'Прибуття вчасно','Yard occupancy rate':'Заповненість двору','Equipment utilization':'Завантаженість техніки','Daily inbound / outbound volume':'Щоденний обсяг вхід / вихід','Dock utilization':'Завантаженість доків','Shipment statuses':'Статуси відправлень','average over range':'середнє за період','current records':'поточні записи','shipments':'відправлень','OVERVIEW':'ОГЛЯД','CARRIER & VEHICLE':'ПЕРЕВІЗНИК І АВТО','CARGO':'ВАНТАЖ','GATE & DOCK':'ВОРОТА І ДОК','OPERATIONAL TIMELINE':'ОПЕРАЦІЙНА ХРОНОЛОГІЯ','RELATED PALLETS':'ПОВʼЯЗАНІ ПАЛЕТИ','RELATED TASKS':'ПОВʼЯЗАНІ ЗАДАЧІ','ACTIVITY HISTORY':'ІСТОРІЯ ДІЙ','VEHICLE':'ТРАНСПОРТ','LOCATION':'РОЗТАШУВАННЯ','ASSIGNMENT':'ПРИЗНАЧЕННЯ','EQUIPMENT':'ТЕХНІКА','MAINTENANCE':'ОБСЛУГОВУВАННЯ','OCCUPANCY':'ЗАЙНЯТІСТЬ','ASSIGN & SCHEDULE':'ПРИЗНАЧЕННЯ І РОЗКЛАД','OPERATIONAL HISTORY':'ІСТОРІЯ ОПЕРАЦІЙ','TASK':'ЗАДАЧА','GATE':'ВОРОТА','Assign vehicle':'Призначити авто','Assign dock':'Призначити док','Assign shipment':'Призначити відправлення','Move to zone':'Перемістити в зону','Status override':'Ручний статус','None (live)':'Немає (з двору)','Edit':'Редагувати','Locate in 3D':'Показати в 3D','Open record in Operations':'Відкрити запис в Операціях','View details':'Деталі','Edit shipment':'Редагувати відправлення','Mark completed':'Позначити завершеним','Cancel shipment':'Скасувати відправлення','Send to maintenance':'На обслуговування','Return to service':'Повернути в роботу','Block':'Заблокувати','Set maintenance':'Обслуговування','Clear block / maintenance':'Зняти блок / ТО','Start':'Почати','Complete':'Завершити','Mark blocked':'Позначити заблокованою','Cancel':'Скасувати','Create shipment':'Створити відправлення','Save changes':'Зберегти','Create task':'Створити задачу','No records match these filters':'Немає записів за цими фільтрами','clear filters':'скинути фільтри','No records yet':'Записів ще немає','Data-only record: this vehicle is not on site, so it is not drawn in the 3D scene.':'Запис лише в даних: авто не на майданчику, тому його немає в 3D-сцені.','Prev':'Назад','Next':'Далі','Page':'Сторінка','selected':'вибрано','Gates':'Ворота','& Docks':'і доки','Tasks':'Задачі','& Alerts':'й алерти','SHIPMENT':'ВІДПРАВЛЕННЯ','PALLET':'ПАЛЕТА','GATE / DOCK':'ВОРОТА / ДОК','Quantity':'Кількість','Pallets in records':'Палет у записах','positions':'позицій','ready now':'вільні зараз','in use now':'працюють зараз','needs attention':'потребує уваги','all on schedule':'усе за графіком','total today':'усього сьогодні','in 3D':'у 3D','excl. departed':'без тих, що поїхали','Dock area':'Зона доків','Bulk storage':'Масове зберігання','Quarantine':'Карантин','Staging A':'Зона A','Staging B':'Зона B','Delayed Arrival':'Затримка прибуття','Dock Conflict':'Конфлікт доку','Equipment Failure':'Збій техніки','Low Battery':'Низький заряд','Storage Capacity Warning':'Переповнення зони','Missing Shipment Information':'Неповні дані відправлення','Destination':'Пункт призначення','Origin → site':'Звідки → склад','Shipment created':'Створено відправлення','Dock assigned':'Призначено док','Check-in completed':'Реєстрацію завершено','Pallet moved to':'Палету переміщено в'});
 const RULES=Object.keys(UK).sort((a,b)=>b.length-a.length).map(k=>[new RegExp('(?<![A-Za-z])'+esc(k)+'(?![A-Za-z])','g'),UK[k]]);
 let LANG='en';try{LANG=localStorage.getItem('yt-lang')||'en'}catch(e){}
 function tr(str){if(LANG==='en'||!str||!/[A-Za-z]/.test(str))return str;let r=str;for(const [re,v] of RULES)r=r.replace(re,v);return r}
