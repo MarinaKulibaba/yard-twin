@@ -292,7 +292,7 @@ table.dt{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;min
 .tag.bad{background:#fef2f2;color:#991b1b}.tag.bad .tid{background:#fecaca;color:#991b1b}
 .tag.link{background:#0f172a;color:#fff;font-size:12px;padding:5px 10px 5px 8px}.tag.link .tid{background:#2563eb;color:#fff}
 .tag.hover{background:#0f172a;color:#fff}.tag.hover .tid{background:rgba(255,255,255,.15);color:#fff}
-.dchip{position:absolute;transform:translate(-50%,-50%);background:#1d4ed8;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;opacity:.9}
+.dchip{position:absolute;transform:translate(-50%,-50%);background:#1d4ed8;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;opacity:.9}.dchip.busy{background:#16a34a}.dchip.res{background:#d97706}.dchip.off{background:#64748b}.dchip.done{background:#0f766e}.dchip.free{background:#1d4ed8}.dchip.on{outline:2px solid #fff;box-shadow:0 0 0 4px #2563eb;opacity:1;z-index:2}.dchip.tchip{background:#fff;color:#0f172a;font-size:11px;padding:3px 8px;border-radius:6px;box-shadow:0 2px 8px rgba(15,23,42,.18);opacity:.96}
 /* toast, hint, offline */
 #toasts{position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:#0f172a;color:#fff;font-size:13px;border-radius:10px;padding:10px 14px;box-shadow:var(--shadow);display:flex;gap:8px;align-items:center;animation:tin .25s ease-out}
